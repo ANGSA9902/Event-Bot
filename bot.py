@@ -16,72 +16,41 @@ APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 ACTOR_ID = "clockworks~tiktok-scraper"
 
 HASHTAGS = [
-    "RobloxEvent",
     "FashionShowRoblox",
-    "GiveawayRoblox",
-    "RobuxGiveaway",
-    "AvatarKalcer",
-    "EventRoblox",
+    "RobloxEvent",
     "RobloxIndonesia",
-    "RobloxAnomali",
-    "Roblox",
-    "RobloxFyp"
-]
-
-KEYWORDS = [
-    "event",
-    "fashion show",
-    "giveaway",
-    "robux",
-    "kontes",
-    "lomba",
-    "daftar",
-    "hadiah",
-    "anomali",
-    "merah putih",
-    "kemerdekaan",
-    "kalcer",
-    "avatar"
+    "RobloxFyp",
+    "RobloxAnomali"
 ]
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY)
-
 sent_events = set()
 
 def ai_filter_event(text, today_str):
     prompt = f"""
     Kamu adalah AI yang memfilter event Roblox dari TikTok.
     Hari ini: {today_str}
-
     Konten TikTok: "{text}"
 
     Tugas:
     1. Tentukan apakah ini EVENT Roblox yang RELEVAN.
-    2. HANYA event yang AKAN DATANG atau SEDANG BERLANGSUNG yang dianggap event.
-    3. JIKA event sudah SELESAI, lewat, atau hanya pengumuman pemenang, TOLAK.
-    4. Perhatikan kata kunci event seperti: event, fashion show, giveaway, robux, kontes, lomba, daftar, hadiah, anomali, merah putih, kemerdekaan, kalcer, avatar.
-    5. Prioritaskan event dari Indonesia atau komunitas Roblox Indonesia.
+    2. HANYA event yang AKAN DATANG atau SEDANG BERLANGSUNG.
+    3. Event yang sudah selesai / pengumuman pemenang = TOLAK.
+    4. Prioritaskan event Indonesia.
 
-    Kategori event:
-    - fashion_show
-    - avatar_kalcer
-    - giveaway
-    - competition
-    - community_event
-    - event_kemerdekaan
-    - event_anomali (event aneh, unik, misterius, glitch, horor, atau fenomena langka di Roblox)
+    Kategori:
+    fashion_show, avatar_kalcer, giveaway, competition, community_event, event_kemerdekaan, event_anomali
 
     Output JSON:
     {{
         "is_event": true,
-        "title": "Judul event",
-        "category": "kategori",
-        "description": "Deskripsi singkat dan jelas",
-        "prize": "Hadiah (Robux/uang) atau 'Tidak disebutkan'",
-        "deadline": "Tanggal/waktu deadline atau 'Tidak disebutkan'",
-        "reason": "Alasan lolos/tolak"
+        "title": "...",
+        "category": "...",
+        "description": "...",
+        "prize": "...",
+        "deadline": "...",
+        "reason": "..."
     }}
-
     Jawab HANYA JSON.
     """
     try:
@@ -95,56 +64,61 @@ def ai_filter_event(text, today_str):
         print(f"Error AI: {e}")
         return {"is_event": False, "reason": f"Error: {e}"}
 
+async def scrape_hashtag(hashtag):
+    videos = []
+    try:
+        print(f"Mencari video dengan #{hashtag}...")
+        url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs?token={APIFY_TOKEN}"
+        payload = {
+            "hashtags": [hashtag],
+            "resultsPerPage": 3,
+            "maxResults": 3
+        }
+        headers = {"Content-Type": "application/json"}
+        resp = requests.post(url, json=payload, headers=headers)
+        run_data = resp.json()
+        run_id = run_data.get("data", {}).get("id")
+        if not run_id:
+            return videos
+
+        dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items?token={APIFY_TOKEN}"
+
+        items = []
+        for _ in range(10):
+            await asyncio.sleep(3)
+            try:
+                items = requests.get(dataset_url).json()
+                if items:
+                    break
+            except Exception:
+                pass
+
+        for item in items:
+            caption = item.get("text") or item.get("desc") or ""
+            author = item.get("authorMeta", {}).get("name", "unknown")
+            video_url = item.get("webVideoUrl") or item.get("url") or ""
+            if caption:
+                videos.append({
+                    "caption": caption,
+                    "author": author,
+                    "hashtag": hashtag,
+                    "url": video_url
+                })
+
+    except Exception as e:
+        print(f"Error #{hashtag}: {e}")
+
+    return videos
+
 async def get_tiktok_events():
     if not APIFY_TOKEN:
         print("❌ APIFY_TOKEN tidak ditemukan!")
         return []
 
-    all_videos = []
+    tasks = [scrape_hashtag(h) for h in HASHTAGS]
+    results = await asyncio.gather(*tasks)
 
-    for hashtag in HASHTAGS:
-        try:
-            print(f"Mencari video dengan #{hashtag}...")
-            url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs?token={APIFY_TOKEN}"
-            payload = {
-                "hashtags": [hashtag],
-                "resultsPerPage": 5,
-                "maxResults": 5
-            }
-            headers = {"Content-Type": "application/json"}
-            resp = requests.post(url, json=payload, headers=headers)
-            run_data = resp.json()
-            run_id = run_data.get("data", {}).get("id")
-            if not run_id:
-                continue
-
-            dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items?token={APIFY_TOKEN}"
-
-            items = []
-            for _ in range(20):
-                await asyncio.sleep(5)
-                try:
-                    items = requests.get(dataset_url).json()
-                    if items:
-                        break
-                except Exception:
-                    pass
-
-            for item in items:
-                caption = item.get("text") or item.get("desc") or ""
-                author = item.get("authorMeta", {}).get("name", "unknown")
-                video_url = item.get("webVideoUrl") or item.get("url") or ""
-                if caption:
-                    all_videos.append({
-                        "caption": caption,
-                        "author": author,
-                        "hashtag": hashtag,
-                        "url": video_url
-                    })
-
-        except Exception as e:
-            print(f"Error #{hashtag}: {e}")
-
+    all_videos = [v for sublist in results for v in sublist]
     print(f"Total video ditemukan: {len(all_videos)}")
     return all_videos
 
@@ -176,9 +150,7 @@ class DashboardBot(discord.Client):
 
         embed = discord.Embed(
             title=f"🎮 {event_info.get('title', 'Event Roblox')}",
-            description=(
-                f"**📝 Deskripsi**\n{event_info.get('description', 'Tidak ada deskripsi')}"
-            ),
+            description=f"**📝 Deskripsi**\n{event_info.get('description', 'Tidak ada deskripsi')}",
             color=discord.Color.blue()
         )
 
