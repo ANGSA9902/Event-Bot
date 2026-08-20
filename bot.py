@@ -11,7 +11,10 @@ import pytz
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DASHBOARD_CHANNEL_ID = int(os.getenv("DASHBOARD_CHANNEL_ID"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-SESSIONID = os.getenv("SESSIONID")
+
+# --- MS_TOKENS dari Railway (pisahkan dengan koma jika lebih dari satu) ---
+ms_tokens_str = os.getenv("MS_TOKENS", "")
+MS_TOKENS = [t.strip() for t in ms_tokens_str.split(",") if t.strip()]
 
 HASHTAGS = [
     "RobloxEvent",
@@ -76,8 +79,8 @@ async def scrape_hashtag(api, hashtag):
     return videos
 
 async def get_tiktok_events():
-    if not SESSIONID:
-        print("❌ SESSIONID tidak ditemukan di Railway Variables!")
+    if not MS_TOKENS:
+        print("❌ MS_TOKENS tidak ditemukan di Railway Variables!")
         return []
 
     print("[TikTok] Membuat instance TikTokApi...")
@@ -87,10 +90,9 @@ async def get_tiktok_events():
         print("[TikTok] Membuat session (timeout 30s)...")
         await asyncio.wait_for(
             api.create_sessions(
-                ms_tokens=None,
+                ms_tokens=MS_TOKENS,
                 num_sessions=1,
-                sleep_after=3,
-                session_ids=[SESSIONID]
+                sleep_after=3
             ),
             timeout=30
         )
@@ -130,7 +132,7 @@ class DashboardBot(discord.Client):
             )
             await channel.send(embed=embed)
 
-        # Kirim event test supaya Discord teruji
+        # Kirim event test
         test_event = {
             "is_event": True,
             "title": "Test Event Fashion Show",
