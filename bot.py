@@ -46,7 +46,7 @@ HASHTAGS = [
 client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 
 # ============================================================
-# PERSISTENCE UNTUK sent_events (biar tidak reset tiap restart)
+# PERSISTENCE UNTUK sent_events
 # ============================================================
 
 SENT_EVENTS_FILE = "sent_events.json"
@@ -72,15 +72,14 @@ def save_sent_events(sent_events):
 
 sent_events = load_sent_events()
 
-# ============================================================
-# AI FILTER (Gemini) — dijalankan di thread terpisah biar tidak
-# nge-block event loop Discord
-# ============================================================
 
+# ============================================================
+# AI FILTER (Gemini)
+# ============================================================
 
 def _call_gemini_sync(prompt):
     response = client_gemini.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-1.5-flash",
         contents=prompt,
     )
     return response.text
@@ -128,10 +127,8 @@ async def ai_filter_event(text, today_str):
 
 
 # ============================================================
-# APIFY SCRAPER — semua request blocking dibungkus asyncio.to_thread,
-# dan sekarang cek status run sebelum polling dataset
+# APIFY SCRAPER (SEQUENTIAL, bukan parallel, untuk hindari memory limit)
 # ============================================================
-
 
 async def scrape_hashtag(hashtag):
     videos = []
@@ -161,8 +158,6 @@ async def scrape_hashtag(hashtag):
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={APIFY_TOKEN}"
         dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items?token={APIFY_TOKEN}"
 
-        # Poll status run sampai selesai (SUCCEEDED/FAILED/TIMED-OUT/ABORTED)
-        # atau timeout ~60 detik
         final_status = None
         for _ in range(20):
             await asyncio.sleep(3)
@@ -175,14 +170,11 @@ async def scrape_hashtag(hashtag):
 
         if final_status != "SUCCEEDED":
             print(f"⚠️ Run untuk #{hashtag} berakhir dengan status: {final_status}")
-            # tetap lanjut coba ambil dataset items siapa tahu ada partial result
-        else:
-            print(f"✅ Run untuk #{hashtag} SUCCEEDED")
 
         items_resp = await asyncio.to_thread(requests.get, dataset_url, timeout=30)
         items = items_resp.json()
         if not isinstance(items, list):
-            print(f"⚠️ Format dataset items tidak terduga untuk #{hashtag}: {items}")
+            print(f"⚠️ Format dataset items tidak terduga untuk #{hashtag}")
             items = []
 
         for item in items:
@@ -190,14 +182,12 @@ async def scrape_hashtag(hashtag):
             author = item.get("authorMeta", {}).get("name", "unknown")
             video_url = item.get("webVideoUrl") or item.get("url") or ""
             if caption:
-                videos.append(
-                    {
-                        "caption": caption,
-                        "author": author,
-                        "hashtag": hashtag,
-                        "url": video_url,
-                    }
-                )
+                videos.append({
+                    "caption": caption,
+                    "author": author,
+                    "hashtag": hashtag,
+                    "url": video_url,
+                })
 
     except Exception as e:
         print(f"❌ Error #{hashtag}: {e}")
@@ -206,10 +196,12 @@ async def scrape_hashtag(hashtag):
 
 
 async def get_tiktok_events():
-    tasks = [scrape_hashtag(h) for h in HASHTAGS]
-    results = await asyncio.gather(*tasks)
+    all_videos = []
+    for hashtag in HASHTAGS:
+        videos = await scrape_hashtag(hashtag)
+        all_videos.extend(videos)
+        await asyncio.sleep(2)
 
-    all_videos = [v for sublist in results for v in sublist]
     print(f"Total video ditemukan: {len(all_videos)}")
     return all_videos
 
@@ -231,8 +223,6 @@ class DashboardBot(discord.Client):
     async def on_ready(self):
         print(f"Bot {self.user} berhasil login!")
 
-        # on_ready bisa terpanggil berkali-kali (reconnect), jadi hanya
-        # kirim pesan "online" + jalankan cek awal SEKALI saja.
         if self._initial_run_done:
             print("(Reconnect terdeteksi, skip initial run ulang)")
             return
@@ -313,7 +303,7 @@ class DashboardBot(discord.Client):
 
 
 # ============================================================
-# SCHEDULER — reuse instance bot yang sama, JANGAN bikin baru
+# SCHEDULER
 # ============================================================
 
 WIB = pytz.timezone("Asia/Jakarta")
