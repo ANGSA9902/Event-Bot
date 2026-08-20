@@ -13,7 +13,8 @@ DASHBOARD_CHANNEL_ID = int(os.getenv("DASHBOARD_CHANNEL_ID"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 
-ACTOR_ID = "clockworks/tiktok-scraper"
+# Format actor ID yang benar: gunakan ~ bukan /
+ACTOR_ID = "clockworks~tiktok-scraper"
 
 HASHTAGS = [
     "RobloxEvent",
@@ -73,11 +74,12 @@ async def get_tiktok_events():
             url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs?token={APIFY_TOKEN}"
             payload = {
                 "hashtags": [hashtag],
-                "resultsPerPage": 5,
-                "maxResults": 5
+                "resultsPerPage": 5
             }
             headers = {"Content-Type": "application/json"}
             resp = requests.post(url, json=payload, headers=headers)
+            print(f"Response #{hashtag}: {resp.status_code} - {resp.text[:200]}")
+
             run_data = resp.json()
             run_id = run_data.get("data", {}).get("id")
             if not run_id:
@@ -132,6 +134,7 @@ class DashboardBot(discord.Client):
             )
             await channel.send(embed=embed)
 
+        # Kirim event test
         test_event = {
             "is_event": True,
             "title": "Test Event Fashion Show",
