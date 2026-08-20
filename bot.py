@@ -83,8 +83,9 @@ async def get_tiktok_events():
         print("❌ MS_TOKENS tidak ditemukan di Railway Variables!")
         return []
 
-    print("[TikTok] Membuat instance TikTokApi...")
-    api = TikTokApi()
+    print("[TikTok] Membuat instance TikTokApi (WebKit)...")
+    # Gunakan WebKit agar lebih sulit terdeteksi bot
+    api = TikTokApi(browser="webkit", headless=True)
 
     try:
         print("[TikTok] Membuat session (timeout 30s)...")
