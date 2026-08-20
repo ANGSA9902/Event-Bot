@@ -11,7 +11,7 @@ import pytz
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DASHBOARD_CHANNEL_ID = int(os.getenv("DASHBOARD_CHANNEL_ID"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-SESSIONID = os.getenv("SESSIONID")
+MS_TOKENS = os.getenv("MS_TOKENS")  # Renamed dari SESSIONID, lebih akurat
 
 HASHTAGS = [
     "RobloxEvent",
@@ -61,7 +61,7 @@ def ai_filter_event(text):
 async def scrape_hashtag(api, hashtag):
     videos = []
     try:
-        print(f"Mencari video dengan #{hashtag}...")
+        print(f"[TikTok] Mencari video dengan #{hashtag}...")
         async def search():
             async for video in api.hashtag(name=hashtag).videos(count=3):
                 caption = video.as_dict.get("desc", "")
@@ -70,44 +70,59 @@ async def scrape_hashtag(api, hashtag):
                     videos.append({"caption": caption, "author": author, "hashtag": hashtag})
         await asyncio.wait_for(search(), timeout=15)
     except asyncio.TimeoutError:
-        print(f"Timeout untuk #{hashtag}")
+        print(f"[TikTok] ⏱️ Timeout untuk #{hashtag}")
     except Exception as e:
-        print(f"Error #{hashtag}: {e}")
+        print(f"[TikTok] ❌ Error #{hashtag}: {e}")
     return videos
 
 async def get_tiktok_events():
-    if not SESSIONID:
-        print("❌ SESSIONID tidak ditemukan di Railway Variables!")
-        return []
+    # Gunakan ms_tokens (array string) atau num_sessions saja
+    ms_tokens_list = None
+    if MS_TOKENS:
+        # Jika ada multiple tokens, split dengan koma
+        ms_tokens_list = [token.strip() for token in MS_TOKENS.split(",")]
+        print(f"[TikTok] Menggunakan {len(ms_tokens_list)} ms_token(s) dari env")
+    else:
+        print("[TikTok] ⚠️ MS_TOKENS tidak ditemukan. Akan coba tanpa tokens khusus.")
 
     print("[TikTok] Membuat instance TikTokApi...")
     api = TikTokApi()
 
     try:
         print("[TikTok] Membuat session (timeout 30s)...")
+        # Signature yang benar: create_sessions(num_sessions, ms_tokens, dll)
         await asyncio.wait_for(
             api.create_sessions(
-                ms_tokens=None,
                 num_sessions=1,
+                ms_tokens=ms_tokens_list,
                 sleep_after=3,
-                session_ids=[SESSIONID]
+                headless=True
             ),
             timeout=30
         )
-        print("✅ Session TikTok berhasil dibuat!")
+        print("✅ [TikTok] Session berhasil dibuat!")
+    except asyncio.TimeoutError:
+        print("❌ [TikTok] TIMEOUT saat create_sessions() (>30s). TikTok API lambat atau tidak merespons.")
+        return []
     except Exception as e:
-        print(f"❌ Error saat create_sessions(): {e}")
+        print(f"❌ [TikTok] Error saat create_sessions(): {e}")
+        print("[TikTok] Tips: Pastikan MS_TOKENS (ms_token) valid dan TikTok tidak memblokir request")
         return []
 
+    print(f"[TikTok] Mulai scraping {len(HASHTAGS)} hashtag dengan parallel tasks...")
     tasks = [scrape_hashtag(api, h) for h in HASHTAGS]
     try:
-        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=60)
+        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=120)
+        print("[TikTok] ✅ Scraping semua hashtag selesai")
+    except asyncio.TimeoutError:
+        print("❌ [TikTok] TIMEOUT saat scraping hashtag (>120s)")
+        results = []
     except Exception as e:
-        print(f"❌ Error saat scraping hashtags: {e}")
+        print(f"❌ [TikTok] Error saat scraping hashtags: {e}")
         results = []
 
     all_videos = [v for sublist in results for v in sublist]
-    print(f"Total video ditemukan: {len(all_videos)}")
+    print(f"[TikTok] Total video ditemukan: {len(all_videos)}")
     return all_videos
 
 intents = discord.Intents.default()
@@ -178,26 +193,31 @@ class DashboardBot(discord.Client):
             return
 
         if not videos:
-            print("Tidak ada video ditemukan.")
+            print("⚠️ Tidak ada video ditemukan.")
             return
 
         event_count = 0
         for video in videos:
-            print(f"\nMenganalisa dari @{video['author']}...")
-            result = ai_filter_event(video['caption'])
-            if result.get('is_event'):
-                print(f"EVENT: {result.get('title')}")
-                await self.send_event_to_dashboard(result, video['author'], video['hashtag'])
-                event_count += 1
-            else:
-                print("Bukan event")
-        print(f"\nTotal event dikirim: {event_count}")
+            try:
+                print(f"\n[Bot] Menganalisa dari @{video['author']}...")
+                result = ai_filter_event(video['caption'])
+                if result.get('is_event'):
+                    print(f"[Bot] ✅ EVENT: {result.get('title')}")
+                    await self.send_event_to_dashboard(result, video['author'], video['hashtag'])
+                    event_count += 1
+                else:
+                    print("[Bot] ❌ Bukan event")
+            except Exception as e:
+                print(f"[Bot] ❌ Error saat proses video: {e}")
+                continue
+
+        print(f"\n[Bot] Total event dikirim: {event_count}")
 
 WIB = pytz.timezone('Asia/Jakarta')
 scheduler = AsyncIOScheduler(timezone=WIB)
 
 async def update_pagi():
-    print(f"\nUPDATE PAGI - {datetime.now(WIB).strftime('%H:%M WIB')}")
+    print(f"\n[Scheduler] UPDATE PAGI - {datetime.now(WIB).strftime('%H:%M WIB')}")
     bot = DashboardBot()
     await bot.cek_dan_kirim_event()
 
@@ -211,3 +231,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
