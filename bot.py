@@ -104,26 +104,48 @@ async def scrape_hashtag(api, hashtag):
     return videos
 
 async def get_tiktok_events():
+    print("[TikTok] Membuat instance TikTokApi...")
     api = TikTokApi()
-    
-    # Buat session dengan sessionid
-    await api.create_sessions(
-        ms_tokens=None,
-        num_sessions=1,
-        sleep_after=3,
-        sessionids=[SESSIONID]
-    )
-    
-    # Scrape semua hashtag secara paralel
-    tasks = [scrape_hashtag(api, hashtag) for hashtag in HASHTAGS]
-    results = await asyncio.gather(*tasks)
-    
+
+    # Buat session dengan sessionid (dengan timeout supaya tidak hang selamanya)
+    try:
+        print("[TikTok] Membuat session (timeout 30s)...")
+        await asyncio.wait_for(
+            api.create_sessions(
+                ms_tokens=None,
+                num_sessions=1,
+                sleep_after=3,
+                sessionids=[SESSIONID]
+            ),
+            timeout=30
+        )
+        print("[TikTok] Session berhasil dibuat.")
+    except asyncio.TimeoutError:
+        print("[TikTok] TIMEOUT saat create_sessions() (>30s). Melewati pengecekan TikTok kali ini.")
+        return []
+    except Exception as e:
+        print(f"[TikTok] Error saat create_sessions(): {e}")
+        return []
+
+    # Scrape semua hashtag secara paralel, dengan timeout tambahan di level luar
+    try:
+        print(f"[TikTok] Mulai scraping {len(HASHTAGS)} hashtag (timeout 60s)...")
+        tasks = [scrape_hashtag(api, hashtag) for hashtag in HASHTAGS]
+        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=60)
+        print("[TikTok] Scraping semua hashtag selesai.")
+    except asyncio.TimeoutError:
+        print("[TikTok] TIMEOUT saat scraping hashtag (>60s). Melanjutkan dengan hasil yang ada (kosong).")
+        results = []
+    except Exception as e:
+        print(f"[TikTok] Error saat scraping hashtag: {e}")
+        results = []
+
     # Gabungkan semua video
     all_videos = []
     for videos in results:
         all_videos.extend(videos)
-    
-    print(f"Total video ditemukan: {len(all_videos)}")
+
+    print(f"[TikTok] Total video ditemukan: {len(all_videos)}")
     return all_videos
 
 intents = discord.Intents.default()
@@ -182,32 +204,42 @@ class DashboardBot(discord.Client):
     
     async def cek_dan_kirim_event(self):
         print("\nMULAI CEK EVENT TIKTOK...\n")
-        
-        videos = await get_tiktok_events()
-        
+
+        try:
+            print("[Bot] Memanggil get_tiktok_events()...")
+            videos = await get_tiktok_events()
+            print("[Bot] get_tiktok_events() selesai.")
+        except Exception as e:
+            print(f"[Bot] ERROR tidak terduga saat mengambil event TikTok: {e}")
+            videos = []
+
         if not videos:
             print("Tidak ada video ditemukan.")
             return
-        
+
         event_count = 0
-        
+
         for video in videos:
-            caption = video['caption']
-            author = video['author']
-            hashtag = video['hashtag']
-            
-            print(f"\nMenganalisa dari @{author}...")
-            print(f"Caption: {caption[:80]}...")
-            
-            result = ai_filter_event(caption)
-            
-            if result.get('is_event'):
-                print(f"EVENT: {result.get('title')}")
-                await self.send_event_to_dashboard(result, author, hashtag)
-                event_count += 1
-            else:
-                print("Bukan event")
-        
+            try:
+                caption = video['caption']
+                author = video['author']
+                hashtag = video['hashtag']
+
+                print(f"\nMenganalisa dari @{author}...")
+                print(f"Caption: {caption[:80]}...")
+
+                result = ai_filter_event(caption)
+
+                if result.get('is_event'):
+                    print(f"EVENT: {result.get('title')}")
+                    await self.send_event_to_dashboard(result, author, hashtag)
+                    event_count += 1
+                else:
+                    print("Bukan event")
+            except Exception as e:
+                print(f"[Bot] Error saat memproses video dari @{video.get('author', 'unknown')}: {e}")
+                continue
+
         print(f"\nTotal event dikirim: {event_count}")
 
 WIB = pytz.timezone('Asia/Jakarta')
