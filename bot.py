@@ -52,7 +52,7 @@ def ai_filter_event(text):
     """
     try:
         response = client_gemini.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.6-flash",
             contents=prompt
         )
         result_text = response.text.replace("```json", "").replace("```", "").strip()
@@ -78,7 +78,7 @@ async def get_tiktok_events():
             }
             headers = {"Content-Type": "application/json"}
             resp = requests.post(url, json=payload, headers=headers)
-            print(f"Response #{hashtag}: {resp.status_code} - {resp.text[:200]}")
+            print(f"Response #{hashtag}: {resp.status_code}")
 
             run_data = resp.json()
             run_id = run_data.get("data", {}).get("id")
