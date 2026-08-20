@@ -2,8 +2,8 @@ import discord
 import asyncio
 from google import genai
 import json
-from TikTokApi import TikTokApi
 import os
+import requests
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 import pytz
@@ -11,10 +11,9 @@ import pytz
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DASHBOARD_CHANNEL_ID = int(os.getenv("DASHBOARD_CHANNEL_ID"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 
-# --- MS_TOKENS dari Railway (pisahkan dengan koma jika lebih dari satu) ---
-ms_tokens_str = os.getenv("MS_TOKENS", "")
-MS_TOKENS = [t.strip() for t in ms_tokens_str.split(",") if t.strip()]
+ACTOR_ID = "clockworks/tiktok-scraper"
 
 HASHTAGS = [
     "RobloxEvent",
@@ -61,54 +60,55 @@ def ai_filter_event(text):
         print(f"Error AI: {e}")
         return {"is_event": False, "reason": f"Error: {e}"}
 
-async def scrape_hashtag(api, hashtag):
-    videos = []
-    try:
-        print(f"Mencari video dengan #{hashtag}...")
-        async def search():
-            async for video in api.hashtag(name=hashtag).videos(count=3):
-                caption = video.as_dict.get("desc", "")
-                author = video.as_dict.get("author", {}).get("uniqueId", "unknown")
+def get_tiktok_events():
+    if not APIFY_TOKEN:
+        print("❌ APIFY_TOKEN tidak ditemukan!")
+        return []
+
+    all_videos = []
+
+    for hashtag in HASHTAGS:
+        try:
+            print(f"Mencari video dengan #{hashtag}...")
+            url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs?token={APIFY_TOKEN}"
+            payload = {
+                "hashtags": [hashtag],
+                "resultsPerPage": 5,
+                "maxResults": 5
+            }
+            headers = {"Content-Type": "application/json"}
+            resp = requests.post(url, json=payload, headers=headers)
+            run_data = resp.json()
+            run_id = run_data.get("data", {}).get("id")
+            if not run_id:
+                print(f"Gagal start run untuk #{hashtag}")
+                continue
+
+            dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items?token={APIFY_TOKEN}"
+
+            items = []
+            for _ in range(20):
+                await asyncio.sleep(5)
+                try:
+                    items = requests.get(dataset_url).json()
+                    if items:
+                        break
+                except Exception:
+                    pass
+
+            for item in items:
+                caption = item.get("text") or item.get("desc") or ""
+                author = item.get("authorMeta", {}).get("name", "unknown")
                 if caption:
-                    videos.append({"caption": caption, "author": author, "hashtag": hashtag})
-        await asyncio.wait_for(search(), timeout=15)
-    except asyncio.TimeoutError:
-        print(f"Timeout untuk #{hashtag}")
-    except Exception as e:
-        print(f"Error #{hashtag}: {e}")
-    return videos
+                    all_videos.append({
+                        "caption": caption,
+                        "author": author,
+                        "hashtag": hashtag
+                    })
 
-async def get_tiktok_events():
-    if not MS_TOKENS:
-        print("❌ MS_TOKENS tidak ditemukan di Railway Variables!")
-        return []
+        except Exception as e:
+            print(f"Error #{hashtag}: {e}")
 
-    print("[TikTok] Membuat instance TikTokApi...")
-    api = TikTokApi()
-
-    try:
-        print("[TikTok] Membuat session (timeout 30s)...")
-        await asyncio.wait_for(
-            api.create_sessions(
-                ms_tokens=MS_TOKENS,
-                num_sessions=1,
-                sleep_after=3
-            ),
-            timeout=30
-        )
-        print("✅ Session TikTok berhasil dibuat!")
-    except Exception as e:
-        print(f"❌ Error saat create_sessions(): {e}")
-        return []
-
-    tasks = [scrape_hashtag(api, h) for h in HASHTAGS]
-    try:
-        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=60)
-    except Exception as e:
-        print(f"❌ Error saat scraping hashtags: {e}")
-        results = []
-
-    all_videos = [v for sublist in results for v in sublist]
     print(f"Total video ditemukan: {len(all_videos)}")
     return all_videos
 
@@ -132,7 +132,6 @@ class DashboardBot(discord.Client):
             )
             await channel.send(embed=embed)
 
-        # Kirim event test
         test_event = {
             "is_event": True,
             "title": "Test Event Fashion Show",
@@ -173,11 +172,7 @@ class DashboardBot(discord.Client):
 
     async def cek_dan_kirim_event(self):
         print("\n[Bot] MULAI CEK EVENT TIKTOK...\n")
-        try:
-            videos = await get_tiktok_events()
-        except Exception as e:
-            print(f"❌ Error saat ambil video: {e}")
-            return
+        videos = get_tiktok_events()
 
         if not videos:
             print("Tidak ada video ditemukan.")
