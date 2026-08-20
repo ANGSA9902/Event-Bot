@@ -28,6 +28,22 @@ HASHTAGS = [
     "RobloxFyp"
 ]
 
+KEYWORDS = [
+    "event",
+    "fashion show",
+    "giveaway",
+    "robux",
+    "kontes",
+    "lomba",
+    "daftar",
+    "hadiah",
+    "anomali",
+    "merah putih",
+    "kemerdekaan",
+    "kalcer",
+    "avatar"
+]
+
 client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 
 sent_events = set()
@@ -43,6 +59,8 @@ def ai_filter_event(text, today_str):
     1. Tentukan apakah ini EVENT Roblox yang RELEVAN.
     2. HANYA event yang AKAN DATANG atau SEDANG BERLANGSUNG yang dianggap event.
     3. JIKA event sudah SELESAI, lewat, atau hanya pengumuman pemenang, TOLAK.
+    4. Perhatikan kata kunci event seperti: event, fashion show, giveaway, robux, kontes, lomba, daftar, hadiah, anomali, merah putih, kemerdekaan, kalcer, avatar.
+    5. Prioritaskan event dari Indonesia atau komunitas Roblox Indonesia.
 
     Kategori event:
     - fashion_show
@@ -90,7 +108,8 @@ async def get_tiktok_events():
             url = f"https://api.apify.com/v2/acts/{ACTOR_ID}/runs?token={APIFY_TOKEN}"
             payload = {
                 "hashtags": [hashtag],
-                "resultsPerPage": 5
+                "resultsPerPage": 5,
+                "maxResults": 5
             }
             headers = {"Content-Type": "application/json"}
             resp = requests.post(url, json=payload, headers=headers)
