@@ -5,7 +5,7 @@ import json
 import os
 import requests
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime
+from datetime import datetime, timezone
 import pytz
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -13,7 +13,6 @@ DASHBOARD_CHANNEL_ID = int(os.getenv("DASHBOARD_CHANNEL_ID"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 
-# Format actor ID yang benar: gunakan ~ bukan /
 ACTOR_ID = "clockworks~tiktok-scraper"
 
 HASHTAGS = [
@@ -23,36 +22,52 @@ HASHTAGS = [
     "RobuxGiveaway",
     "AvatarKalcer",
     "EventRoblox",
-    "RobloxIndonesia"
+    "RobloxIndonesia",
+    "RobloxAnomali"
 ]
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 
-def ai_filter_event(text):
+# Simpan event yang sudah dikirim agar tidak duplikat
+sent_events = set()
+
+def ai_filter_event(text, today_str):
     prompt = f"""
-    Kamu adalah AI yang bertugas memfilter informasi event Roblox dari TikTok.
+    Kamu adalah AI yang memfilter event Roblox dari TikTok.
+    Hari ini: {today_str}
+
     Konten TikTok: "{text}"
+
     Tugas:
-    1. Tentukan apakah konten ini adalah EVENT Roblox yang RELEVAN
-    2. Event yang relevan: fashion show, giveaway Robux/uang, kontes avatar, turnamen, event komunitas, event merah putih, event kemerdekaan, avatar kalcer
-    3. BUKAN event jika: promo biasa, jual beli, chating, spam, tidak jelas, video biasa
+    1. Tentukan apakah ini EVENT Roblox yang RELEVAN.
+    2. HANYA event yang AKAN DATANG atau SEDANG BERLANGSUNG yang dianggap event.
+    3. JIKA event sudah SELESAI, lewat, atau hanya pengumuman pemenang, TOLAK.
+
     Kategori event:
-    - fashion_show, avatar_kalcer, giveaway, competition, community_event, event_kemerdekaan
-    Format output (JSON):
+    - fashion_show
+    - avatar_kalcer
+    - giveaway
+    - competition
+    - community_event
+    - event_kemerdekaan
+    - event_anomali (event aneh, unik, misterius, glitch, horor, atau fenomena langka di Roblox)
+
+    Output JSON:
     {{
-        "is_event": true/false,
-        "title": "...",
-        "category": "...",
-        "description": "...",
-        "prize": "...",
-        "deadline": "...",
-        "reason": "..."
+        "is_event": true,
+        "title": "Judul event",
+        "category": "kategori",
+        "description": "Deskripsi singkat dan jelas",
+        "prize": "Hadiah (Robux/uang) atau 'Tidak disebutkan'",
+        "deadline": "Tanggal/waktu deadline atau 'Tidak disebutkan'",
+        "reason": "Alasan lolos/tolak"
     }}
-    Jawab HANYA dengan JSON.
+
+    Jawab HANYA JSON.
     """
     try:
         response = client_gemini.models.generate_content(
-            model="gemini-3.6-flash",
+            model="gemini-2.5-flash",
             contents=prompt
         )
         result_text = response.text.replace("```json", "").replace("```", "").strip()
@@ -78,12 +93,9 @@ async def get_tiktok_events():
             }
             headers = {"Content-Type": "application/json"}
             resp = requests.post(url, json=payload, headers=headers)
-            print(f"Response #{hashtag}: {resp.status_code}")
-
             run_data = resp.json()
             run_id = run_data.get("data", {}).get("id")
             if not run_id:
-                print(f"Gagal start run untuk #{hashtag}")
                 continue
 
             dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items?token={APIFY_TOKEN}"
@@ -101,11 +113,13 @@ async def get_tiktok_events():
             for item in items:
                 caption = item.get("text") or item.get("desc") or ""
                 author = item.get("authorMeta", {}).get("name", "unknown")
+                video_url = item.get("webVideoUrl") or item.get("url") or ""
                 if caption:
                     all_videos.append({
                         "caption": caption,
                         "author": author,
-                        "hashtag": hashtag
+                        "hashtag": hashtag,
+                        "url": video_url
                     })
 
         except Exception as e:
@@ -124,7 +138,6 @@ class DashboardBot(discord.Client):
 
     async def on_ready(self):
         print(f"Bot {self.user} berhasil login!")
-
         channel = self.get_channel(self.dashboard_channel_id)
         if channel:
             embed = discord.Embed(
@@ -134,44 +147,33 @@ class DashboardBot(discord.Client):
             )
             await channel.send(embed=embed)
 
-        # Kirim event test
-        test_event = {
-            "is_event": True,
-            "title": "Test Event Fashion Show",
-            "category": "fashion_show",
-            "description": "Event percobaan untuk memastikan Discord berfungsi.",
-            "prize": "1000 Robux",
-            "deadline": "Besok 19:00 WIB",
-            "reason": "Test"
-        }
-        await self.send_event_to_dashboard(test_event, "test_user", "Test")
-
         await self.cek_dan_kirim_event()
 
-    async def send_event_to_dashboard(self, event_info, source_author="unknown", source_hashtag=""):
+    async def send_event_to_dashboard(self, event_info, source_author="unknown", source_hashtag="", video_url=""):
         channel = self.get_channel(self.dashboard_channel_id)
         if not channel:
-            print("❌ Channel tidak ditemukan!")
-            return False
+            return
 
         embed = discord.Embed(
             title=f"🎮 {event_info.get('title', 'Event Roblox')}",
-            description=event_info.get('description', ''),
+            description=(
+                f"**📝 Deskripsi**\n{event_info.get('description', 'Tidak ada deskripsi')}"
+            ),
             color=discord.Color.blue()
         )
-        if event_info.get('category'):
-            embed.add_field(name="📂 Kategori", value=event_info['category'], inline=True)
-        if event_info.get('prize'):
-            embed.add_field(name="💰 Hadiah", value=event_info['prize'], inline=True)
-        if event_info.get('deadline'):
-            embed.add_field(name="⏰ Deadline", value=event_info['deadline'], inline=True)
+
+        embed.add_field(name="📂 Kategori", value=event_info.get('category', 'Tidak diketahui'), inline=True)
+        embed.add_field(name="💰 Hadiah", value=event_info.get('prize', 'Tidak disebutkan'), inline=True)
+        embed.add_field(name="⏰ Deadline", value=event_info.get('deadline', 'Tidak disebutkan'), inline=True)
         embed.add_field(name="📱 Sumber", value=f"TikTok @{source_author}", inline=True)
-        if source_hashtag:
-            embed.add_field(name="🏷️ Hashtag", value=f"#{source_hashtag}", inline=True)
+        embed.add_field(name="🏷️ Hashtag", value=f"#{source_hashtag}", inline=True)
+
+        if video_url:
+            embed.add_field(name="🔗 Link TikTok", value=f"[Klik di sini]({video_url})", inline=False)
+
         embed.set_footer(text="✅ Event lolos filter AI")
         await channel.send(embed=embed)
         print(f"Event dikirim: {event_info.get('title')}")
-        return True
 
     async def cek_dan_kirim_event(self):
         print("\n[Bot] MULAI CEK EVENT TIKTOK...\n")
@@ -181,16 +183,30 @@ class DashboardBot(discord.Client):
             print("Tidak ada video ditemukan.")
             return
 
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         event_count = 0
+
         for video in videos:
-            print(f"\nMenganalisa dari @{video['author']}...")
-            result = ai_filter_event(video['caption'])
+            unique_key = video.get('url', '') or video.get('caption', '')
+            if unique_key in sent_events:
+                continue
+
+            result = ai_filter_event(video['caption'], today_str)
+
             if result.get('is_event'):
-                print(f"EVENT: {result.get('title')}")
-                await self.send_event_to_dashboard(result, video['author'], video['hashtag'])
+                title = result.get('title', 'Event Roblox')
+                print(f"EVENT: {title}")
+                await self.send_event_to_dashboard(
+                    result,
+                    video['author'],
+                    video['hashtag'],
+                    video.get('url', '')
+                )
+                sent_events.add(unique_key)
                 event_count += 1
             else:
-                print("Bukan event")
+                print("Bukan event / sudah lewat")
+
         print(f"\nTotal event dikirim: {event_count}")
 
 WIB = pytz.timezone('Asia/Jakarta')
