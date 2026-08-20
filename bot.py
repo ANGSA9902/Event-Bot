@@ -138,7 +138,7 @@ async def ai_filter_event(text, today_str):
         result = json.loads(cleaned)
         return result
     except Exception as e:
-        logger.error(f"Error AI: {e}")
+        logger.error(f"Error AI filter: {e}")
         return {"is_event": False, "reason": str(e)}
 
 # ============================================================
@@ -249,11 +249,11 @@ class DashboardBot(discord.Client):
         if channel:
             embed = discord.Embed(
                 title="🟢 BOT EVENT FILTER ONLINE!",
-                description="**Sistem pemantau event Roblox dari TikTok**\n\n"
-                           "📱 Memantau hashtag:\n"
-                           f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}\n\n"
-                           "⏰ Update otomatis: **06:00 WIB**\n"
-                           "🤖 Filter: **AI Gemini**\n"
+                description="**Sistem pemantau event Roblox dari TikTok**\\n\\n"
+                           "📱 Memantau hashtag:\\n"
+                           f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}\\n\\n"
+                           "⏰ Update otomatis: **06:00 WIB**\\n"
+                           "🤖 Filter: **AI Gemini**\\n"
                            "✅ Validasi: **Manual oleh Owner**",
                 color=discord.Color.green(),
             )
@@ -355,13 +355,13 @@ class DashboardBot(discord.Client):
 
         embed = discord.Embed(
             title="🔍 EVENT PERLU VALIDASI",
-            description=f"**Event ditemukan, mohon validasi:**\n\n"
-                       f"**📝 Judul:** {event_info.get('title', 'Tidak ada judul')}\n"
-                       f"**📂 Kategori:** {event_info.get('category', 'Unknown')}\n"
-                       f"**💰 Hadiah:** {event_info.get('prize', 'Tidak disebutkan')}\n"
-                       f"**⏰ Deadline:** {event_info.get('deadline', 'Tidak disebutkan')}\n\n"
-                       f"**📝 Deskripsi:**\n{event_info.get('description', 'Tidak ada deskripsi')}\n\n"
-                       f"**📱 Sumber:** TikTok @{video.get('author', 'unknown')}\n"
+            description=f"**Event ditemukan, mohon validasi:**\\n\\n"
+                       f"**📝 Judul:** {event_info.get('title', 'Tidak ada judul')}\\n"
+                       f"**📂 Kategori:** {event_info.get('category', 'Unknown')}\\n"
+                       f"**💰 Hadiah:** {event_info.get('prize', 'Tidak disebutkan')}\\n"
+                       f"**⏰ Deadline:** {event_info.get('deadline', 'Tidak disebutkan')}\\n\\n"
+                       f"**📝 Deskripsi:**\\n{event_info.get('description', 'Tidak ada deskripsi')}\\n\\n"
+                       f"**📱 Sumber:** TikTok @{video.get('author', 'unknown')}\\n"
                        f"**🏷️ Hashtag:** #{video.get('hashtag', '')}",
             color=discord.Color.orange(),
         )
@@ -393,7 +393,7 @@ class DashboardBot(discord.Client):
             event_info = data.get("event_info", {})
             embed.add_field(
                 name=f"ID: {event_id} - {event_info.get('title', 'No title')}",
-                value=f"Kategori: {event_info.get('category', 'Unknown')}\n"
+                value=f"Kategori: {event_info.get('category', 'Unknown')}\\n"
                       f"Hadiah: {event_info.get('prize', 'Tidak disebutkan')}",
                 inline=False
             )
@@ -453,7 +453,7 @@ class DashboardBot(discord.Client):
 
         embed = discord.Embed(
             title=f"🎮 {event_info.get('title', 'Event Roblox')}",
-            description=f"**📝 Deskripsi**\n{event_info.get('description', 'Tidak ada deskripsi')}",
+            description=f"**📝 Deskripsi**\\n{event_info.get('description', 'Tidak ada deskripsi')}",
             color=discord.Color.blue(),
         )
 
@@ -504,3 +504,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
