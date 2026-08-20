@@ -13,21 +13,15 @@ DASHBOARD_CHANNEL_ID = int(os.getenv("DASHBOARD_CHANNEL_ID"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SESSIONID = os.getenv("SESSIONID")
 
+# Hashtag utama yang paling relevan
 HASHTAGS = [
     "RobloxEvent",
     "FashionShowRoblox",
     "GiveawayRoblox",
-    "RobloxGiveaway",
+    "RobuxGiveaway",
     "AvatarKalcer",
     "EventRoblox",
-    "RobloxIndonesia",
-    "KontesAvatar",
-    "LombaRoblox",
-    "RobuxGiveaway",
-    "EventMerahPutih",
-    "EventKemerdekaan",
-    "GiveawayRobux",
-    "EventRobloxIndonesia"
+    "RobloxIndonesia"
 ]
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY)
@@ -81,6 +75,34 @@ def ai_filter_event(text):
         print(f"Error AI: {e}")
         return {"is_event": False, "reason": f"Error: {e}"}
 
+async def scrape_hashtag(api, hashtag):
+    """Scrape satu hashtag dengan timeout"""
+    videos = []
+    try:
+        print(f"Mencari video dengan #{hashtag}...")
+        
+        async def search():
+            async for video in api.hashtag(name=hashtag).videos(count=3):
+                caption = video.as_dict.get("desc", "")
+                author = video.as_dict.get("author", {}).get("uniqueId", "unknown")
+                
+                if caption:
+                    videos.append({
+                        "caption": caption,
+                        "author": author,
+                        "hashtag": hashtag
+                    })
+        
+        # Timeout 20 detik per hashtag
+        await asyncio.wait_for(search(), timeout=20)
+        
+    except asyncio.TimeoutError:
+        print(f"Timeout untuk #{hashtag}")
+    except Exception as e:
+        print(f"Error mencari #{hashtag}: {e}")
+    
+    return videos
+
 async def get_tiktok_events():
     api = TikTokApi()
     
@@ -92,25 +114,14 @@ async def get_tiktok_events():
         sessionids=[SESSIONID]
     )
     
-    all_videos = []
+    # Scrape semua hashtag secara paralel
+    tasks = [scrape_hashtag(api, hashtag) for hashtag in HASHTAGS]
+    results = await asyncio.gather(*tasks)
     
-    for hashtag in HASHTAGS:
-        try:
-            print(f"Mencari video dengan #{hashtag}...")
-            
-            async for video in api.hashtag(name=hashtag).videos(count=5):
-                caption = video.as_dict.get("desc", "")
-                author = video.as_dict.get("author", {}).get("uniqueId", "unknown")
-                
-                if caption:
-                    all_videos.append({
-                        "caption": caption,
-                        "author": author,
-                        "hashtag": hashtag
-                    })
-                    
-        except Exception as e:
-            print(f"Error mencari #{hashtag}: {e}")
+    # Gabungkan semua video
+    all_videos = []
+    for videos in results:
+        all_videos.extend(videos)
     
     print(f"Total video ditemukan: {len(all_videos)}")
     return all_videos
