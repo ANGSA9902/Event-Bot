@@ -79,7 +79,7 @@ sent_events = load_sent_events()
 
 def _call_gemini_sync(prompt):
     response = client_gemini.models.generate_content(
-        model="gemini-1.5-flash",
+        model="gemini-3.6-flash",
         contents=prompt,
     )
     return response.text
