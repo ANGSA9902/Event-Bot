@@ -23,12 +23,13 @@ HASHTAGS = [
     "AvatarKalcer",
     "EventRoblox",
     "RobloxIndonesia",
-    "RobloxAnomali"
+    "RobloxAnomali",
+    "Roblox",
+    "RobloxFyp"
 ]
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY)
 
-# Simpan event yang sudah dikirim agar tidak duplikat
 sent_events = set()
 
 def ai_filter_event(text, today_str):
