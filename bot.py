@@ -11,6 +11,7 @@ import pytz
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DASHBOARD_CHANNEL_ID = int(os.getenv("DASHBOARD_CHANNEL_ID"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+SESSIONID = os.getenv("SESSIONID")
 
 HASHTAGS = [
     "RobloxEvent",
@@ -82,6 +83,14 @@ def ai_filter_event(text):
 
 async def get_tiktok_events():
     api = TikTokApi()
+    
+    # Buat session dengan sessionid
+    await api.create_sessions(
+        ms_tokens=None,
+        num_sessions=1,
+        sleep_after=3,
+        sessionids=[SESSIONID]
+    )
     
     all_videos = []
     
