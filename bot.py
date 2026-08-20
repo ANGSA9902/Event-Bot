@@ -60,7 +60,7 @@ def ai_filter_event(text):
         print(f"Error AI: {e}")
         return {"is_event": False, "reason": f"Error: {e}"}
 
-def get_tiktok_events():
+async def get_tiktok_events():
     if not APIFY_TOKEN:
         print("❌ APIFY_TOKEN tidak ditemukan!")
         return []
@@ -172,7 +172,7 @@ class DashboardBot(discord.Client):
 
     async def cek_dan_kirim_event(self):
         print("\n[Bot] MULAI CEK EVENT TIKTOK...\n")
-        videos = get_tiktok_events()
+        videos = await get_tiktok_events()
 
         if not videos:
             print("Tidak ada video ditemukan.")
