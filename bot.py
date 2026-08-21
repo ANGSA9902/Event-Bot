@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta
 import pytz
 import re
+from discord.ui import Button, View
 
 # ============================================================
 # LOGGING
@@ -207,11 +208,32 @@ async def scrape_tiktok_apify(hashtag):
     return videos
 
 # ============================================================
-# BUILD UI ─── KEREN & ELEGAN
+# VIEW / TOMBOL
 # ============================================================
 
-def build_event_card(video, keyword=None):
-    """Buat tampilan event card yang keren & elegan."""
+class EventView(View):
+    def __init__(self, video_url):
+        super().__init__()
+        self.add_item(Button(
+            label="🔗 Lihat di TikTok",
+            url=video_url,
+            style=discord.ButtonStyle.link
+        ))
+        self.add_item(Button(
+            label="📢 Share Event",
+            style=discord.ButtonStyle.primary,
+            custom_id="share"
+        ))
+
+    @discord.ui.button(label="📢 Share Event", style=discord.ButtonStyle.primary)
+    async def share_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("✅ Event sudah di-share!", ephemeral=True)
+
+# ============================================================
+# BUILD UI KEREN
+# ============================================================
+
+def build_embed(video, keyword=None):
     caption = video.get("caption", "")
     author = video.get("author", "unknown")
     hashtag = video.get("hashtag", "")
@@ -227,15 +249,15 @@ def build_event_card(video, keyword=None):
     has_tomorrow = any(d == tomorrow for d in dates)
     
     if has_today:
-        color = 0xFF6B6B  # merah
+        color = 0xFF6B6B
         status = "🔥 HARI INI"
         icon = "🔴"
     elif has_tomorrow:
-        color = 0xFFD93D  # kuning
+        color = 0xFFD93D
         status = "⏰ BESOK"
         icon = "🟡"
     else:
-        color = 0x6BCBFF  # biru
+        color = 0x6BCBFF
         status = "📅 MENDATANG"
         icon = "🔵"
     
@@ -243,13 +265,18 @@ def build_event_card(video, keyword=None):
     embed = discord.Embed(
         title=f"✦ {icon} {status}",
         description=f"```\n{caption[:500].strip()}\n```",
-        color=color
+        color=color,
+        timestamp=datetime.now(WIB)
     )
     
-    # ── AUTHOR & HASHTAG ──
+    embed.set_author(
+        name=f"@{author}",
+        icon_url="https://cdn.discordapp.com/emojis/1298439013180113058.png"
+    )
+    
     embed.add_field(
-        name="",
-        value=f"**👤 {author}**  •  #{hashtag}",
+        name="🏷️ Hashtag",
+        value=f"#{hashtag}",
         inline=False
     )
     
@@ -266,26 +293,21 @@ def build_event_card(video, keyword=None):
                 date_lines.append(f"`•` {date.strftime('%d %B %Y')} → {selisih} hari lagi")
         
         embed.add_field(
-            name="",
+            name="📅 Tanggal Event",
             value="\n".join(date_lines),
             inline=False
         )
     
-    # ── LINK ──
-    if video_url:
-        embed.add_field(
-            name="",
-            value=f"[➜  Lihat di TikTok]({video_url})",
-            inline=False
-        )
-    
-    # ── FOOTER ──
     embed.set_footer(
         text=f"• {datetime.now(WIB).strftime('%d %b %Y %H:%M')} WIB",
         icon_url="https://cdn.discordapp.com/emojis/1298439013180113058.png"
     )
     
-    return embed
+    embed.set_thumbnail(
+        url="https://cdn.discordapp.com/emojis/1298439013180113058.png"
+    )
+    
+    return embed, EventView(video_url)
 
 # ============================================================
 # COMMAND HANDLER
@@ -328,115 +350,174 @@ def extract_event_keyword(message):
     return content
 
 # ============================================================
-# DISCORD BOT
+# COMMAND: PURGE
 # ============================================================
 
-intents = discord.Intents.default()
-intents.message_content = True
+bot = discord.Client(intents=discord.Intents.default())
+bot.intents.message_content = True
 
-class TikTokBot(discord.Client):
-    def __init__(self):
-        super().__init__(intents=intents)
-        self.channel_id = CHANNEL_ID
-
-    async def on_ready(self):
-        logger.info(f"✅ Bot {self.user} login!")
-        
-        channel = self.get_channel(self.channel_id)
-        if channel:
-            embed = discord.Embed(
-                title="✦  TikTok Event Finder",
-                description=(
-                    "🔍 **Cari event Roblox dari TikTok**\n\n"
-                    "─── **Cara Pakai** ───\n"
-                    f"`@{self.user.name} event anomali`\n"
-                    "`/event fashion`\n"
-                    "`!event kalcer`\n\n"
-                    "─── **Keyword** ───\n"
-                    "`anomali`  •  `roblox`  •  `fashion`  •  `kalcer`  •  `fashionshow`"
-                ),
-                color=0x6BCBFF
-            )
-            embed.set_footer(text="✦ Made with ❤️ • Event Finder v3")
-            await channel.send(embed=embed)
-
-    async def on_message(self, message):
-        if message.author == self.user:
-            return
-        
-        if is_command(message):
-            await self.handle_event_command(message)
-
-    async def handle_event_command(self, message):
-        keyword = extract_event_keyword(message)
-        
-        # ── LOADING ──
-        loading_embed = discord.Embed(
-            title="✦  🔍  Mencari...",
-            description=f"Event **{keyword}** di TikTok",
+@bot.event
+async def on_ready():
+    logger.info(f"✅ Bot {bot.user} login!")
+    
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        embed = discord.Embed(
+            title="✦ TikTok Event Finder",
+            description=(
+                "🔍 Cari event Roblox dari TikTok\n\n"
+                "─── Cara Pakai ───\n"
+                f"`@{bot.user.name} event anomali`\n"
+                "`/event fashion`\n"
+                "`!event kalcer`\n\n"
+                "─── Command ───\n"
+                "`!purge 50` → hapus 50 pesan\n"
+                "`!purgeuser @user 20` → hapus pesan user\n"
+                "`!purgebot 30` → hapus pesan bot\n\n"
+                "─── Keyword ───\n"
+                "`anomali` • `roblox` • `fashion` • `kalcer`"
+            ),
             color=0x6BCBFF
         )
-        loading_embed.set_footer(text="Mohon tunggu sebentar...")
-        loading_msg = await message.reply(embed=loading_embed)
-        
-        # ── SCRAPE ──
-        all_videos = []
-        for hashtag in HASHTAGS:
-            videos = await scrape_tiktok_apify(hashtag)
-            all_videos.extend(videos)
-            await asyncio.sleep(1)
-        
-        # ── FILTER ──
-        keyword_lower = keyword.lower()
-        filtered_videos = []
-        
-        for video in all_videos:
-            caption = video.get("caption", "").lower()
-            if keyword_lower in caption or keyword_lower in video.get("hashtag", "").lower():
-                dates = extract_all_dates(video.get("caption", ""))
-                if dates:
-                    filtered_videos.append(video)
-        
-        await loading_msg.delete()
-        
-        # ── TIDAK ADA ──
-        if not filtered_videos:
-            embed = discord.Embed(
-                title="✦  ❌  Tidak Ditemukan",
-                description=(
-                    f"Keyword **{keyword}** tidak ditemukan.\n\n"
-                    "─── **Tips** ───\n"
-                    "• Coba keyword lain\n"
-                    "• Cek langsung di TikTok\n\n"
-                    "─── **Hashtag** ───\n"
-                    f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}"
-                ),
-                color=0xFF6B6B
-            )
-            embed.set_footer(text="✦ Coba lagi dengan keyword yang berbeda")
-            await message.reply(embed=embed)
+        embed.set_footer(text="✦ Made with ❤️ • Event Finder v3")
+        await channel.send(embed=embed)
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    
+    # ── COMMAND PURGE ──
+    if message.content.startswith('!purge'):
+        if not message.author.guild_permissions.manage_messages:
+            await message.reply("❌ Kamu tidak punya izin!")
             return
         
-        # ── HASIL ──
-        result_embed = discord.Embed(
-            title=f"✦  ✅  {len(filtered_videos)} Event Ditemukan",
-            description=f"Keyword: **{keyword}**",
-            color=0x6BCBFF
-        )
-        await message.reply(embed=result_embed)
+        try:
+            parts = message.content.split()
+            amount = int(parts[1]) if len(parts) > 1 else 10
+            if amount < 1 or amount > 100:
+                await message.reply("❌ Jumlah harus 1-100!")
+                return
+            
+            deleted = await message.channel.purge(limit=amount + 1)
+            await message.channel.send(f"✅ {len(deleted)-1} pesan dihapus!", delete_after=5)
+        except:
+            await message.reply("❌ Gagal hapus pesan!")
+    
+    # ── COMMAND PURGEUSER ──
+    elif message.content.startswith('!purgeuser'):
+        if not message.author.guild_permissions.manage_messages:
+            await message.reply("❌ Kamu tidak punya izin!")
+            return
         
-        # ── KIRIM EVENT CARDS ──
-        for video in filtered_videos[:5]:
-            embed = build_event_card(video, keyword)
-            await message.channel.send(embed=embed)
-            await asyncio.sleep(0.5)
+        try:
+            parts = message.content.split()
+            if len(parts) < 3:
+                await message.reply("❌ Format: !purgeuser @user 10")
+                return
+            
+            user_id = int(parts[1].replace('<@', '').replace('>', '').replace('!', ''))
+            user = await bot.fetch_user(user_id)
+            amount = int(parts[2]) if len(parts) > 2 else 10
+            
+            def check(msg):
+                return msg.author == user
+            
+            deleted = await message.channel.purge(limit=amount + 1, check=check)
+            await message.channel.send(f"✅ {len(deleted)-1} pesan dari {user.mention} dihapus!", delete_after=5)
+        except:
+            await message.reply("❌ Gagal hapus pesan!")
+    
+    # ── COMMAND PURGEBOT ──
+    elif message.content.startswith('!purgebot'):
+        if not message.author.guild_permissions.manage_messages:
+            await message.reply("❌ Kamu tidak punya izin!")
+            return
+        
+        try:
+            parts = message.content.split()
+            amount = int(parts[1]) if len(parts) > 1 else 10
+            
+            def check(msg):
+                return msg.author.bot
+            
+            deleted = await message.channel.purge(limit=amount + 1, check=check)
+            await message.channel.send(f"✅ {len(deleted)-1} pesan bot dihapus!", delete_after=5)
+        except:
+            await message.reply("❌ Gagal hapus pesan!")
+    
+    # ── EVENT COMMAND ──
+    elif is_command(message):
+        await handle_event_command(message)
 
+async def handle_event_command(message):
+    keyword = extract_event_keyword(message)
+    
+    # ── LOADING ──
+    loading_embed = discord.Embed(
+        title="✦ 🔍 Mencari...",
+        description=f"Event **{keyword}** di TikTok",
+        color=0x6BCBFF
+    )
+    loading_embed.set_footer(text="Mohon tunggu sebentar...")
+    loading_msg = await message.reply(embed=loading_embed)
+    
+    # ── SCRAPE ──
+    all_videos = []
+    for hashtag in HASHTAGS:
+        videos = await scrape_tiktok_apify(hashtag)
+        all_videos.extend(videos)
+        await asyncio.sleep(1)
+    
+    # ── FILTER ──
+    keyword_lower = keyword.lower()
+    filtered_videos = []
+    
+    for video in all_videos:
+        caption = video.get("caption", "").lower()
+        if keyword_lower in caption or keyword_lower in video.get("hashtag", "").lower():
+            dates = extract_all_dates(video.get("caption", ""))
+            if dates:
+                filtered_videos.append(video)
+    
+    await loading_msg.delete()
+    
+    # ── TIDAK ADA ──
+    if not filtered_videos:
+        embed = discord.Embed(
+            title="✦ ❌ Tidak Ditemukan",
+            description=(
+                f"Keyword **{keyword}** tidak ditemukan.\n\n"
+                "─── Tips ───\n"
+                "• Coba keyword lain\n"
+                "• Cek langsung di TikTok\n\n"
+                "─── Hashtag ───\n"
+                f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}"
+            ),
+            color=0xFF6B6B
+        )
+        embed.set_footer(text="✦ Coba lagi dengan keyword yang berbeda")
+        await message.reply(embed=embed)
+        return
+    
+    # ── HASIL ──
+    result_embed = discord.Embed(
+        title=f"✦ ✅ {len(filtered_videos)} Event Ditemukan",
+        description=f"Keyword: **{keyword}**",
+        color=0x6BCBFF
+    )
+    await message.reply(embed=result_embed)
+    
+    # ── KIRIM EVENT CARDS ──
+    for video in filtered_videos[:5]:
+        embed, view = build_embed(video, keyword)
+        await message.channel.send(embed=embed, view=view)
+        await asyncio.sleep(0.5)
 
 # ============================================================
 # MAIN
 # ============================================================
-
-bot = TikTokBot()
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
