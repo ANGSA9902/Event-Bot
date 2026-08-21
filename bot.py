@@ -33,7 +33,6 @@ HASHTAGS = [
     "RobloxAnomali",
 ]
 
-# Keyword yang dicari di caption
 KEYWORDS = [
     "event", "giveaway", "hadiah", "robux", "competition",
     "lomba", "fashion show", "fashionshow", "anomali",
@@ -62,11 +61,11 @@ def save_sent(sent):
 sent_videos = load_sent()
 
 # ============================================================
-# SCRAPE TIKTOK (DENGAN PLAYWRIGHT)
+# SCRAPE TIKTOK (PAKAI PLAYWRIGHT)
 # ============================================================
 
 async def scrape_tiktok(hashtag):
-    """Ambil video dari TikTok hashtag menggunakan Playwright."""
+    """Ambil video dari TikTok hashtag pake Playwright."""
     videos = []
     
     try:
@@ -77,21 +76,18 @@ async def scrape_tiktok(hashtag):
             )
             page = await context.new_page()
             
-            # Buka halaman hashtag TikTok
             url = f"https://www.tiktok.com/tag/{hashtag}"
             logger.info(f"Membuka {url}")
             await page.goto(url, timeout=30000)
             await page.wait_for_timeout(3000)
             
-            # Scroll untuk load lebih banyak video
             for _ in range(3):
                 await page.mouse.wheel(0, 1000)
                 await page.wait_for_timeout(1000)
             
-            # Ambil data video
             video_elements = await page.query_selector_all('div[data-e2e="user-post-item"]')
             
-            for element in video_elements[:5]:  # Ambil 5 video pertama
+            for element in video_elements[:5]:
                 try:
                     caption_elem = await element.query_selector('div[data-e2e="video-desc"]')
                     caption = await caption_elem.text_content() if caption_elem else ""
@@ -163,12 +159,10 @@ class TikTokBot(discord.Client):
             )
             await channel.send(embed=embed)
         
-        # Mulai scan
         await self.scan_events()
         
-        # Loop scan setiap 6 jam
         while True:
-            await asyncio.sleep(21600)  # 21600 detik = 6 jam
+            await asyncio.sleep(21600)
             await self.scan_events()
 
     async def scan_events(self):
@@ -194,14 +188,11 @@ class TikTokBot(discord.Client):
             for video in all_videos:
                 video_url = video.get("url", "")
                 
-                # Skip yang sudah dikirim
                 if video_url in sent_videos:
                     continue
                 
-                # Cek keyword
                 keywords = cek_keyword(video["caption"])
                 
-                # Kirim jika ada minimal 1 keyword
                 if keywords:
                     await self.send_to_discord(video, keywords)
                     sent_videos.add(video_url)
