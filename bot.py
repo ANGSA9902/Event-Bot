@@ -95,7 +95,7 @@ logger.info(f"Loaded {len(sent_events)} sent events dari file")
 
 def _call_gemini_sync(prompt):
     response = client_gemini.models.generate_content(
-        model="gemini-2.0-flash",  # ✅ Model terbaru
+        model="gemini-2.0-flash",  # ✅ MODEL TERBARU (FIXED)
         contents=prompt,
     )
     return response.text
