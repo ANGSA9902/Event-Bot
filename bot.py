@@ -23,20 +23,22 @@ logger = logging.getLogger(__name__)
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
-APIFY_TOKEN = os.getenv("APIFY_TOKEN")  # <-- WAJIB diisi!
+APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 
+# HASHTAGS YANG DIPANTAU
 HASHTAGS = [
-    "FashionShowRoblox",
-    "RobloxEvent",
-    "RobloxIndonesia",
     "RobloxFyp",
+    "RobloxIndonesia",
     "RobloxAnomali",
+    "FashionShowRoblox",
 ]
 
+# KEYWORD YANG DICARI (show, event, fashion DIHAPUS)
 KEYWORDS = [
-    "event", "giveaway", "hadiah", "robux", "competition",
-    "lomba", "fashion show", "fashionshow", "anomali",
-    "avatar", "kalcer", "kemerdekaan", "join", "ikuti"
+    "anomali",
+    "roblox",
+    "kalcer",
+    "fashionshow",
 ]
 
 WIB = pytz.timezone("Asia/Jakarta")
@@ -69,21 +71,19 @@ async def scrape_tiktok_apify(hashtag):
     videos = []
     
     if not APIFY_TOKEN:
-        logger.error("❌ APIFY_TOKEN tidak ditemukan! Set di Railway Variables.")
+        logger.error("❌ APIFY_TOKEN tidak ditemukan!")
         return videos
     
     try:
-        # 1. Jalankan actor Apify
-        run_url = "https://api.apify.com/v2/acts/makework36~tiktok-scraper-api/runs"
+        # PAKAI ACTOR GRATIS
+        run_url = "https://api.apify.com/v2/acts/jupri~tiktok-scraper-api-free/runs"
         params = {
             "token": APIFY_TOKEN
         }
         payload = {
             "hashtags": [hashtag],
-            "resultsLimit": 5,
-            "shouldDownloadVideos": False,
-            "shouldDownloadSubtitles": False,
-            "shouldDownloadComments": False
+            "resultsPerPage": 5,
+            "maxResults": 3,
         }
         
         response = await asyncio.to_thread(
@@ -98,14 +98,14 @@ async def scrape_tiktok_apify(hashtag):
         run_id = run_data.get("data", {}).get("id")
         
         if not run_id:
-            logger.error("❌ Gagal dapat run_id dari Apify")
+            logger.error("❌ Gagal dapat run_id")
             return videos
         
         logger.info(f"🔄 Apify running... (ID: {run_id})")
         
-        # 2. Tunggu hasil (polling)
+        # Tunggu hasil
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}"
-        max_wait = 30  # detik
+        max_wait = 40
         waited = 0
         
         while waited < max_wait:
@@ -116,18 +116,16 @@ async def scrape_tiktok_apify(hashtag):
             status = status_data.get("data", {}).get("status")
             
             if status == "SUCCEEDED":
-                # 3. Ambil hasil
                 dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items"
                 dataset_response = await asyncio.to_thread(
-                    requests.get, dataset_url, params={"token": APIFY_TOKEN}, timeout=10
+                    requests.get, dataset_url, params={"token": APIFY_TOKEN, "limit": 5}, timeout=10
                 )
                 items = dataset_response.json()
                 
                 for item in items:
-                    caption = item.get("caption", "")
+                    caption = item.get("text", "") or item.get("caption", "") or item.get("desc", "")
                     author = item.get("author", {}).get("uniqueId", "unknown") if isinstance(item.get("author"), dict) else item.get("author", "unknown")
-                    video_id = item.get("id", "")
-                    video_url = f"https://www.tiktok.com/@{author}/video/{video_id}" if video_id else item.get("webVideoUrl", "")
+                    video_url = item.get("webVideoUrl", "") or item.get("url", "")
                     
                     if caption:
                         videos.append({
@@ -147,17 +145,11 @@ async def scrape_tiktok_apify(hashtag):
             await asyncio.sleep(3)
             waited += 3
         
-        if waited >= max_wait:
-            logger.warning(f"⏰ Timeout waiting for Apify #{hashtag}")
-        
     except Exception as e:
-        logger.error(f"❌ Error Apify #{hashtag}: {e}")
+        logger.error(f"❌ Error Apify: {e}")
     
     return videos
 
-# ============================================================
-# CEK KEYWORD
-# ============================================================
 
 def cek_keyword(caption):
     """Cek apakah caption mengandung keyword."""
@@ -165,10 +157,11 @@ def cek_keyword(caption):
     found = []
     
     for keyword in KEYWORDS:
-        if keyword in caption_lower:
+        if keyword.lower() in caption_lower:
             found.append(keyword)
     
     return found
+
 
 # ============================================================
 # DISCORD BOT
@@ -187,14 +180,13 @@ class TikTokBot(discord.Client):
         logger.info(f"✅ Bot {self.user} login!")
         
         if not APIFY_TOKEN:
-            logger.warning("⚠️ APIFY_TOKEN belum diisi! Bot tidak bisa scrape.")
+            logger.warning("⚠️ APIFY_TOKEN belum diisi!")
         
         channel = self.get_channel(self.channel_id)
         if channel:
             embed = discord.Embed(
                 title="🟢 TikTok Monitor ONLINE! (Apify)",
-                description=f"Scraping TikTok pake Apify API\n\n"
-                           f"📱 Hashtags:\n"
+                description=f"📱 Hashtags:\n"
                            f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}\n\n"
                            f"🔑 Keywords:\n"
                            f"{', '.join(KEYWORDS)}",
@@ -202,12 +194,10 @@ class TikTokBot(discord.Client):
             )
             await channel.send(embed=embed)
         
-        # Mulai scan
         await self.scan_events()
         
-        # Scan setiap 6 jam
         while True:
-            await asyncio.sleep(21600)
+            await asyncio.sleep(21600)  # 6 jam
             await self.scan_events()
 
     async def scan_events(self):
