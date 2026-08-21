@@ -4,8 +4,9 @@ import requests
 import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
+import re
 
 # ============================================================
 # LOGGING
@@ -33,14 +34,6 @@ HASHTAGS = [
     "FashionShowRoblox",
 ]
 
-# KEYWORD YANG DICARI
-KEYWORDS = [
-    "anomali",
-    "roblox",
-    "kalcer",
-    "fashionshow",
-]
-
 WIB = pytz.timezone("Asia/Jakarta")
 
 # ============================================================
@@ -63,6 +56,57 @@ def save_sent(sent):
 sent_videos = load_sent()
 
 # ============================================================
+# CEK TANGGAL EVENT
+# ============================================================
+
+def is_today_or_tomorrow(caption):
+    """Cek apakah caption mention tanggal hari ini atau besok."""
+    now = datetime.now(WIB)
+    today_str = now.strftime("%d/%m/%Y")
+    tomorrow_str = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+    
+    date_patterns = [
+        r'(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})',
+        r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|Mei|Jun|Jul|Agu|Sep|Okt|Nov|Des)\s+(\d{4})',
+        r'(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})',
+        r'tanggal\s+(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})',
+        r'(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})',
+    ]
+    
+    caption_lower = caption.lower()
+    
+    for pattern in date_patterns:
+        matches = re.findall(pattern, caption)
+        for match in matches:
+            try:
+                if len(match) == 3:
+                    if len(match[2]) == 2:
+                        year = 2000 + int(match[2])
+                    else:
+                        year = int(match[2])
+                    
+                    day = int(match[0])
+                    month = int(match[1])
+                    
+                    try:
+                        date_obj = datetime(year, month, day, tzinfo=WIB)
+                        date_str = date_obj.strftime("%d/%m/%Y")
+                        
+                        if date_str == today_str or date_str == tomorrow_str:
+                            return True
+                    except:
+                        pass
+            except:
+                pass
+    
+    if "hari ini" in caption_lower or "today" in caption_lower:
+        return True
+    if "besok" in caption_lower or "tomorrow" in caption_lower:
+        return True
+    
+    return False
+
+# ============================================================
 # SCRAPE TIKTOK PAKAI APIFY
 # ============================================================
 
@@ -75,15 +119,12 @@ async def scrape_tiktok_apify(hashtag):
         return videos
     
     try:
-        # PAKAI ACTOR RESMI clockworks
         run_url = "https://api.apify.com/v2/acts/clockworks~tiktok-scraper/runs"
-        params = {
-            "token": APIFY_TOKEN
-        }
+        params = {"token": APIFY_TOKEN}
         payload = {
             "searchQueries": [hashtag],
-            "maxResults": 5,
-            "resultsPerPage": 5,
+            "maxResults": 10,
+            "resultsPerPage": 10,
             "shouldDownloadVideos": False,
             "shouldDownloadSubtitles": False,
             "shouldDownloadComments": False
@@ -93,25 +134,22 @@ async def scrape_tiktok_apify(hashtag):
             requests.post, run_url, params=params, json=payload, timeout=30
         )
         
-        # 201 = CREATED (berhasil)
         if response.status_code not in [200, 201]:
             logger.error(f"❌ Apify error: {response.status_code}")
             return videos
         
         run_data = response.json()
         
-        # Cek response structure
         if "data" in run_data and "id" in run_data["data"]:
             run_id = run_data["data"]["id"]
         elif "id" in run_data:
             run_id = run_data["id"]
         else:
-            logger.error(f"❌ Gagal dapat run_id: {run_data}")
+            logger.error(f"❌ Gagal dapat run_id")
             return videos
         
         logger.info(f"🔄 Apify running... (ID: {run_id})")
         
-        # Tunggu hasil
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}"
         max_wait = 45
         waited = 0
@@ -123,10 +161,7 @@ async def scrape_tiktok_apify(hashtag):
             status_data = status_response.json()
             status = status_data.get("data", {}).get("status")
             
-            logger.info(f"⏳ Status: {status}")
-            
             if status == "SUCCEEDED":
-                # Ambil hasil
                 dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items"
                 dataset_response = await asyncio.to_thread(
                     requests.get, dataset_url, params={"token": APIFY_TOKEN, "limit": 10}, timeout=10
@@ -144,6 +179,7 @@ async def scrape_tiktok_apify(hashtag):
                             "author": author,
                             "hashtag": hashtag,
                             "url": video_url,
+                            "create_time": item.get("createTime", ""),
                         })
                 
                 logger.info(f"✅ #{hashtag}: {len(videos)} video dari Apify")
@@ -156,26 +192,10 @@ async def scrape_tiktok_apify(hashtag):
             await asyncio.sleep(3)
             waited += 3
         
-        if waited >= max_wait:
-            logger.warning(f"⏰ Timeout #{hashtag}")
-        
     except Exception as e:
         logger.error(f"❌ Error Apify: {e}")
     
     return videos
-
-
-def cek_keyword(caption):
-    """Cek apakah caption mengandung keyword."""
-    caption_lower = caption.lower()
-    found = []
-    
-    for keyword in KEYWORDS:
-        if keyword.lower() in caption_lower:
-            found.append(keyword)
-    
-    return found
-
 
 # ============================================================
 # DISCORD BOT
@@ -202,8 +222,8 @@ class TikTokBot(discord.Client):
                 title="🟢 TikTok Monitor ONLINE! (Apify)",
                 description=f"📱 Hashtags:\n"
                            f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}\n\n"
-                           f"🔑 Keywords:\n"
-                           f"{', '.join(KEYWORDS)}",
+                           f"📅 Filter: Hanya event HARI INI & BESOK\n"
+                           f"🔑 Keyword: TIDAK ADA (ambil semua video)",
                 color=discord.Color.green(),
             )
             await channel.send(embed=embed)
@@ -211,7 +231,7 @@ class TikTokBot(discord.Client):
         await self.scan_events()
         
         while True:
-            await asyncio.sleep(21600)  # 6 jam
+            await asyncio.sleep(21600)
             await self.scan_events()
 
     async def scan_events(self):
@@ -233,6 +253,7 @@ class TikTokBot(discord.Client):
             logger.info(f"📊 Total video: {len(all_videos)}")
             
             kirim_count = 0
+            skip_tanggal = 0
             
             for video in all_videos:
                 video_url = video.get("url", "")
@@ -240,37 +261,54 @@ class TikTokBot(discord.Client):
                 if video_url in sent_videos:
                     continue
                 
-                keywords = cek_keyword(video["caption"])
+                # FILTER: Cek tanggal di caption (hari ini atau besok)
+                caption = video.get("caption", "")
+                if not is_today_or_tomorrow(caption):
+                    skip_tanggal += 1
+                    continue
                 
-                if keywords:
-                    await self.send_to_discord(video, keywords)
-                    sent_videos.add(video_url)
-                    save_sent(sent_videos)
-                    kirim_count += 1
-                    await asyncio.sleep(1)
+                # LANGSUNG KIRIM (tanpa filter keyword)
+                await self.send_to_discord(video)
+                sent_videos.add(video_url)
+                save_sent(sent_videos)
+                kirim_count += 1
+                await asyncio.sleep(1)
             
-            logger.info(f"✅ Total dikirim: {kirim_count}")
+            logger.info(f"✅ Total dikirim: {kirim_count} | Skip (bukan hari ini/besok): {skip_tanggal}")
             
         except Exception as e:
             logger.error(f"❌ Error scan: {e}")
         finally:
             self.is_scanning = False
 
-    async def send_to_discord(self, video, keywords):
+    async def send_to_discord(self, video):
         channel = self.get_channel(self.channel_id)
         if not channel:
             logger.error("❌ Channel tidak ditemukan!")
             return
         
+        caption = video.get("caption", "")
+        
+        # Tandai kalau event hari ini
+        now = datetime.now(WIB)
+        today_str = now.strftime("%d/%m/%Y")
+        tomorrow_str = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+        
+        if today_str in caption or "hari ini" in caption.lower() or "today" in caption.lower():
+            tag = "🔴 HARI INI!"
+        elif tomorrow_str in caption or "besok" in caption.lower() or "tomorrow" in caption.lower():
+            tag = "🟡 BESOK!"
+        else:
+            tag = "📅 CEK TANGGAL"
+        
         embed = discord.Embed(
-            title="📱 Konten TikTok Relevan!",
-            description=f"**Caption:**\n{video['caption'][:500]}",
+            title=f"📱 {tag}",
+            description=f"**Caption:**\n{caption[:500]}",
             color=discord.Color.blue(),
         )
         
         embed.add_field(name="👤 Author", value=f"@{video['author']}", inline=True)
         embed.add_field(name="🏷️ Hashtag", value=f"#{video['hashtag']}", inline=True)
-        embed.add_field(name="🔑 Keywords", value=", ".join(keywords), inline=False)
         
         if video.get("url"):
             embed.add_field(name="🔗 Link TikTok", value=f"[Klik di sini]({video['url']})", inline=False)
@@ -279,7 +317,7 @@ class TikTokBot(discord.Client):
         
         try:
             await channel.send(embed=embed)
-            logger.info(f"📤 Terkirim: {video['caption'][:50]}")
+            logger.info(f"📤 Terkirim: {caption[:50]}")
         except Exception as e:
             logger.error(f"❌ Gagal kirim: {e}")
 
