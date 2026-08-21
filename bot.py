@@ -223,6 +223,140 @@ async def scrape_tiktok_apify(hashtag):
     return videos
 
 # ============================================================
+# BUILD UI / EMBED
+# ============================================================
+
+def build_event_embed(video, upcoming_dates, all_dates, keyword=None):
+    """Buat embed Discord yang elegant dan rapi."""
+    caption = video.get("caption", "")
+    author = video.get("author", "unknown")
+    hashtag = video.get("hashtag", "")
+    video_url = video.get("url", "")
+    
+    now = datetime.now(WIB)
+    today = now.date()
+    tomorrow = (now + timedelta(days=1)).date()
+    lusa = (now + timedelta(days=2)).date()
+    
+    # ── BUILD HEADER ──
+    if upcoming_dates:
+        has_today = any(d == today for d in upcoming_dates)
+        has_tomorrow = any(d == tomorrow for d in upcoming_dates)
+        
+        if has_today:
+            status_emoji = "🔴"
+            status_text = "🔥 BERLANGSUNG HARI INI!"
+            color = discord.Color.red()
+        elif has_tomorrow:
+            status_emoji = "🟡"
+            status_text = "⏰ BESOK!"
+            color = discord.Color.gold()
+        else:
+            status_emoji = "📅"
+            status_text = "📅 EVENT MENDATANG"
+            color = discord.Color.blue()
+    else:
+        status_emoji = "📅"
+        status_text = "📅 EVENT MENDATANG"
+        color = discord.Color.blue()
+    
+    # ── BUILD DATE LIST ──
+    date_lines = []
+    for date in sorted(all_dates):
+        if date == today:
+            date_lines.append(f"🔴 **{date.strftime('%d %B %Y')}** — *HARI INI!*")
+        elif date == tomorrow:
+            date_lines.append(f"🟡 **{date.strftime('%d %B %Y')}** — *BESOK!*")
+        elif date == lusa:
+            date_lines.append(f"🟢 **{date.strftime('%d %B %Y')}** — *LUSA!*")
+        elif date > today:
+            selisih = (date - today).days
+            date_lines.append(f"📅 **{date.strftime('%d %B %Y')}** — *{selisih} hari lagi*")
+        else:
+            date_lines.append(f"⏰ ~~{date.strftime('%d %B %Y')}~~ — *sudah lewat*")
+    
+    dates_str = "\n".join(date_lines) if date_lines else "❓ *Tidak ada tanggal terdeteksi*"
+    
+    # ── BUILD STATUS ──
+    status_lines = []
+    for date in upcoming_dates:
+        if date == today:
+            status_lines.append("🔴 BERLANGSUNG HARI INI!")
+        elif date == tomorrow:
+            status_lines.append("🟡 BESOK!")
+        elif date == lusa:
+            status_lines.append("🟢 LUSA!")
+        else:
+            selisih = (date - today).days
+            status_lines.append(f"📅 {selisih} HARI LAGI")
+    
+    status_str = "\n".join(status_lines) if status_lines else "📅 Akan datang"
+    
+    # ── CAPTION (clean) ──
+    clean_caption = caption[:600].strip()
+    if len(caption) > 600:
+        clean_caption += "..."
+    
+    # ── TITLE ──
+    if keyword:
+        title = f"{status_emoji} Event **{keyword}** Ditemukan!"
+    else:
+        title = f"{status_emoji} {status_text}"
+    
+    # ── BUILD EMBED ──
+    embed = discord.Embed(
+        title=title,
+        description=f"```{clean_caption}```",
+        color=color,
+        timestamp=datetime.now(WIB)
+    )
+    
+    # ── FIELD: INFO ──
+    embed.add_field(
+        name="👤 **Author**",
+        value=f"@{author}",
+        inline=True
+    )
+    embed.add_field(
+        name="🏷️ **Hashtag**",
+        value=f"#{hashtag}",
+        inline=True
+    )
+    
+    # ── FIELD: TANGGAL ──
+    embed.add_field(
+        name="📅 **Tanggal Event**",
+        value=dates_str,
+        inline=False
+    )
+    
+    # ── FIELD: STATUS ──
+    embed.add_field(
+        name="📌 **Status**",
+        value=f"```{status_str}```",
+        inline=False
+    )
+    
+    # ── LINK ──
+    if video_url:
+        embed.add_field(
+            name="🔗 **Link TikTok**",
+            value=f"[Klik untuk lihat video]({video_url})",
+            inline=False
+        )
+    
+    # ── FOOTER ──
+    embed.set_footer(
+        text=f"🔍 Ditemukan • {datetime.now(WIB).strftime('%d %b %Y %H:%M WIB')}",
+        icon_url="https://cdn.discordapp.com/emojis/123456789.png"  # optional
+    )
+    
+    # ── THUMBNAIL ──
+    embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1298439013180113058.png")
+    
+    return embed
+
+# ============================================================
 # COMMAND HANDLER
 # ============================================================
 
@@ -231,21 +365,17 @@ def is_command(message):
     if not message.guild:
         return False
     
-    # Cek bot mention
     bot_mention = f"<@{bot.user.id}>"
     bot_mention_alt = f"<@!{bot.user.id}>"
     
     content = message.content.lower()
     
-    # Cek apakah mention bot
     if bot_mention in message.content or bot_mention_alt in message.content:
-        # Cek kata kunci event
         keywords = ["event", "ada event", "cari event", "event apa", "event roblox"]
         for kw in keywords:
             if kw in content:
                 return True
     
-    # Cek command /event
     if message.content.startswith("/event") or message.content.startswith("!event"):
         return True
     
@@ -255,7 +385,6 @@ def extract_event_keyword(message):
     """Ambil keyword event dari pesan."""
     content = message.content.lower()
     
-    # Hapus mention bot
     bot_mention = f"<@{bot.user.id}>"
     bot_mention_alt = f"<@!{bot.user.id}>"
     content = content.replace(bot_mention, "").replace(bot_mention_alt, "")
@@ -280,8 +409,6 @@ class TikTokBot(discord.Client):
         super().__init__(intents=intents)
         self.channel_id = CHANNEL_ID
         self.is_scanning = False
-        # Simpan proses pencarian per user
-        self.user_search = {}
 
     async def on_ready(self):
         logger.info(f"✅ Bot {self.user} login!")
@@ -292,22 +419,27 @@ class TikTokBot(discord.Client):
         channel = self.get_channel(self.channel_id)
         if channel:
             embed = discord.Embed(
-                title="🟢 TikTok Event Finder ONLINE!",
-                description=f"📌 **Cara Pakai:**\n"
-                           f"1. Mention bot + kata kunci event\n"
-                           f"   Contoh: `@{self.user.name} event anomali`\n\n"
-                           f"2. Atau ketik `/event [keyword]`\n"
-                           f"   Contoh: `/event fashion`\n\n"
-                           f"🔍 Bot akan cari event di TikTok berdasarkan keyword!",
+                title="✨ **TikTok Event Finder**",
+                description=(
+                    "Selamat datang! Saya akan membantu kamu mencari event Roblox di TikTok.\n\n"
+                    "📌 **Cara Pakai:**\n"
+                    "• Mention saya + kata kunci\n"
+                    "  `@MyEventRoblox event anomali`\n\n"
+                    "• Atau ketik `/event [keyword]`\n"
+                    "  `/event fashion`\n\n"
+                    "🔍 **Contoh keyword:**\n"
+                    "`anomali` • `roblox` • `fashion` • `kalcer`"
+                ),
                 color=discord.Color.green(),
+                timestamp=datetime.now(WIB)
             )
+            embed.set_footer(text="💡 Bot siap mencari event!")
             await channel.send(embed=embed)
 
     async def on_message(self, message):
         if message.author == self.user:
             return
         
-        # Cek apakah ini command event
         if is_command(message):
             await self.handle_event_command(message)
 
@@ -317,121 +449,80 @@ class TikTokBot(discord.Client):
         
         if not keyword:
             embed = discord.Embed(
-                title="❓ Event apa yang mau dicari?",
-                description=f"Contoh: `@{self.user.name} event anomali`\n"
-                           f"Atau: `/event fashion`\n\n"
-                           f"Keyword yang tersedia:\n"
-                           f"• anomali\n"
-                           f"• roblox\n"
-                           f"• fashion\n"
-                           f"• kalcer\n"
-                           f"• dll (bebas)",
-                color=discord.Color.orange(),
+                title="❓ **Event apa yang mau dicari?**",
+                description=(
+                    "Contoh:\n"
+                    "`@MyEventRoblox event anomali`\n"
+                    "`/event fashion`\n\n"
+                    "🔑 **Keyword yang tersedia:**\n"
+                    "`anomali` • `roblox` • `fashion` • `kalcer` • *(bebas)*"
+                ),
+                color=discord.Color.orange()
             )
             await message.reply(embed=embed)
             return
         
-        # Cari event berdasarkan keyword
-        await message.reply(f"🔍 Mencari event **{keyword}** di TikTok...")
+        # ── WAIT MESSAGE ──
+        wait_embed = discord.Embed(
+            title="🔍 **Mencari Event...**",
+            description=f"Sedang mencari event **{keyword}** di TikTok.\nMohon tunggu sebentar ya!",
+            color=discord.Color.blue()
+        )
+        wait_msg = await message.reply(embed=wait_embed)
         
-        # Cari di hashtags
+        # ── SCRAPE ──
         all_videos = []
         for hashtag in HASHTAGS:
-            logger.info(f"📱 Scraping #{hashtag} untuk keyword '{keyword}'...")
+            logger.info(f"📱 Scraping #{hashtag} untuk '{keyword}'...")
             videos = await scrape_tiktok_apify(hashtag)
             all_videos.extend(videos)
             await asyncio.sleep(1)
         
-        # Filter berdasarkan keyword
+        # ── FILTER ──
         keyword_lower = keyword.lower()
         filtered_videos = []
         
         for video in all_videos:
             caption = video.get("caption", "").lower()
-            
-            # Cek apakah keyword ada di caption atau hashtag
             if keyword_lower in caption or keyword_lower in video.get("hashtag", "").lower():
-                # Cek tanggal
                 upcoming, _ = get_upcoming_dates(video.get("caption", ""))
                 if upcoming:
                     filtered_videos.append(video)
         
+        # ── DELETE WAIT MESSAGE ──
+        await wait_msg.delete()
+        
+        # ── NO RESULT ──
         if not filtered_videos:
             embed = discord.Embed(
-                title=f"❌ Tidak ada event **{keyword}** yang ditemukan",
-                description=f"Coba keyword lain, atau cek TikTok langsung.\n\n"
-                           f"🔍 Hashtag yang dicari:\n"
-                           f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}",
-                color=discord.Color.red(),
+                title="❌ **Tidak Ada Event Ditemukan**",
+                description=(
+                    f"Maaf, tidak ada event **{keyword}** yang ditemukan.\n\n"
+                    "💡 **Tips:**\n"
+                    "• Coba keyword lain\n"
+                    "• Cek langsung di TikTok\n\n"
+                    "🔍 **Hashtag yang dicari:**\n"
+                    f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}"
+                ),
+                color=discord.Color.red()
             )
             await message.reply(embed=embed)
             return
         
-        # Kirim hasil
-        await message.reply(f"✅ Ditemukan {len(filtered_videos)} event untuk **{keyword}**!")
-        
-        for video in filtered_videos[:5]:  # Max 5 hasil
-            upcoming_dates, all_dates = get_upcoming_dates(video.get("caption", ""))
-            await self.send_event_embed(message.channel, video, upcoming_dates, all_dates)
-            await asyncio.sleep(1)
-
-    async def send_event_embed(self, channel, video, upcoming_dates, all_dates):
-        """Kirim embed event ke Discord."""
-        caption = video.get("caption", "")
-        
-        now = datetime.now(WIB)
-        today = now.date()
-        tomorrow = (now + timedelta(days=1)).date()
-        lusa = (now + timedelta(days=2)).date()
-        
-        date_lines = []
-        for date in sorted(all_dates):
-            if date == today:
-                date_lines.append(f"🔴 {date.strftime('%d %B %Y')} - HARI INI!")
-            elif date == tomorrow:
-                date_lines.append(f"🟡 {date.strftime('%d %B %Y')} - BESOK!")
-            elif date == lusa:
-                date_lines.append(f"🟢 {date.strftime('%d %B %Y')} - LUSA!")
-            elif date > today:
-                date_lines.append(f"📅 {date.strftime('%d %B %Y')}")
-            else:
-                date_lines.append(f"⏰ {date.strftime('%d %B %Y')} - LEWAT")
-        
-        event_status = []
-        for date in upcoming_dates:
-            if date == today:
-                event_status.append("🔴 BERLANGSUNG HARI INI!")
-            elif date == tomorrow:
-                event_status.append("🟡 BESOK!")
-            elif date == lusa:
-                event_status.append("🟢 LUSA!")
-            else:
-                selisih = (date - today).days
-                event_status.append(f"📅 {selisih} HARI LAGI!")
-        
-        dates_str = "\n".join(date_lines) if date_lines else "Tidak ada tanggal"
-        status_str = "\n".join(event_status) if event_status else "Event akan datang"
-        
-        embed = discord.Embed(
-            title="📱 EVENT TERDETEKSI!",
-            description=f"**Caption:**\n{caption[:800]}",
-            color=discord.Color.blue(),
+        # ── RESULT ──
+        result_embed = discord.Embed(
+            title=f"✅ **{len(filtered_videos)} Event Ditemukan!**",
+            description=f"Menampilkan event untuk keyword **{keyword}**",
+            color=discord.Color.green()
         )
+        await message.reply(embed=result_embed)
         
-        embed.add_field(name="👤 Author", value=f"@{video['author']}", inline=True)
-        embed.add_field(name="🏷️ Hashtag", value=f"#{video['hashtag']}", inline=True)
-        embed.add_field(name="📅 Tanggal", value=dates_str, inline=False)
-        embed.add_field(name="📌 Status", value=status_str, inline=False)
-        
-        if video.get("url"):
-            embed.add_field(name="🔗 Link", value=f"[Klik di sini]({video['url']})", inline=False)
-        
-        embed.set_footer(text=f"Ditemukan: {datetime.now(WIB).strftime('%d %b %Y %H:%M WIB')}")
-        
-        try:
-            await channel.send(embed=embed)
-        except Exception as e:
-            logger.error(f"❌ Gagal kirim embed: {e}")
+        # ── SEND EACH EVENT ──
+        for video in filtered_videos[:5]:
+            upcoming_dates, all_dates = get_upcoming_dates(video.get("caption", ""))
+            embed = build_event_embed(video, upcoming_dates, all_dates, keyword)
+            await message.channel.send(embed=embed)
+            await asyncio.sleep(1)
 
 
 # ============================================================
