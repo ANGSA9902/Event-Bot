@@ -56,11 +56,47 @@ def save_sent(sent):
 sent_videos = load_sent()
 
 # ============================================================
-# CEK TANGGAL EVENT
+# CEK TANGGAL VIDEO (DARI UPLOAD TIME)
 # ============================================================
 
-def is_today_or_tomorrow(caption):
-    """Cek apakah caption mention tanggal hari ini atau besok."""
+def is_recent_video(create_time):
+    """Cek apakah video diupload hari ini atau besok."""
+    if not create_time:
+        return False
+    
+    try:
+        # Coba parse timestamp (bisa berupa integer atau string)
+        if isinstance(create_time, (int, float)):
+            video_date = datetime.fromtimestamp(create_time, tz=WIB)
+        elif isinstance(create_time, str):
+            # Coba format ISO
+            if create_time.isdigit():
+                video_date = datetime.fromtimestamp(int(create_time), tz=WIB)
+            else:
+                # Coba parse string date
+                video_date = datetime.fromisoformat(create_time.replace('Z', '+00:00'))
+                video_date = video_date.astimezone(WIB)
+        else:
+            return False
+        
+        now = datetime.now(WIB)
+        
+        # Cek apakah video dari hari ini atau besok
+        if video_date.date() == now.date():
+            return True
+        if video_date.date() == (now + timedelta(days=1)).date():
+            return True
+        
+        logger.info(f"📅 Skip video dari {video_date.strftime('%d/%m/%Y')}")
+        return False
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Gagal parse tanggal: {e}")
+        return False
+
+
+def is_today_or_tomorrow_caption(caption):
+    """Cek apakah caption mention tanggal hari ini atau besok (fallback)."""
     now = datetime.now(WIB)
     today_str = now.strftime("%d/%m/%Y")
     tomorrow_str = (now + timedelta(days=1)).strftime("%d/%m/%Y")
@@ -172,6 +208,7 @@ async def scrape_tiktok_apify(hashtag):
                     caption = item.get("text", "") or item.get("caption", "") or item.get("desc", "")
                     author = item.get("author", {}).get("uniqueId", "unknown") if isinstance(item.get("author"), dict) else item.get("author", "unknown")
                     video_url = item.get("webVideoUrl", "") or item.get("url", "")
+                    create_time = item.get("createTime", "") or item.get("createdAt", "") or item.get("timestamp", "")
                     
                     if caption:
                         videos.append({
@@ -179,7 +216,7 @@ async def scrape_tiktok_apify(hashtag):
                             "author": author,
                             "hashtag": hashtag,
                             "url": video_url,
-                            "create_time": item.get("createTime", ""),
+                            "create_time": create_time,
                         })
                 
                 logger.info(f"✅ #{hashtag}: {len(videos)} video dari Apify")
@@ -222,8 +259,7 @@ class TikTokBot(discord.Client):
                 title="🟢 TikTok Monitor ONLINE! (Apify)",
                 description=f"📱 Hashtags:\n"
                            f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}\n\n"
-                           f"📅 Filter: Hanya event HARI INI & BESOK\n"
-                           f"🔑 Keyword: TIDAK ADA (ambil semua video)",
+                           f"📅 Filter: Hanya video HARI INI & BESOK (dari upload time)",
                 color=discord.Color.green(),
             )
             await channel.send(embed=embed)
@@ -254,6 +290,7 @@ class TikTokBot(discord.Client):
             
             kirim_count = 0
             skip_tanggal = 0
+            skip_lama = 0
             
             for video in all_videos:
                 video_url = video.get("url", "")
@@ -261,20 +298,28 @@ class TikTokBot(discord.Client):
                 if video_url in sent_videos:
                     continue
                 
-                # FILTER: Cek tanggal di caption (hari ini atau besok)
-                caption = video.get("caption", "")
-                if not is_today_or_tomorrow(caption):
-                    skip_tanggal += 1
-                    continue
+                # FILTER UTAMA: Cek tanggal upload video
+                create_time = video.get("create_time", "")
                 
-                # LANGSUNG KIRIM (tanpa filter keyword)
+                if not is_recent_video(create_time):
+                    # Fallback: cek caption
+                    caption = video.get("caption", "")
+                    if not is_today_or_tomorrow_caption(caption):
+                        skip_tanggal += 1
+                        continue
+                    else:
+                        # Caption bilang hari ini, tapi upload time tidak mendukung
+                        skip_lama += 1
+                        continue
+                
+                # KIRIM VIDEO
                 await self.send_to_discord(video)
                 sent_videos.add(video_url)
                 save_sent(sent_videos)
                 kirim_count += 1
                 await asyncio.sleep(1)
             
-            logger.info(f"✅ Total dikirim: {kirim_count} | Skip (bukan hari ini/besok): {skip_tanggal}")
+            logger.info(f"✅ Total dikirim: {kirim_count} | Skip (bukan hari ini/besok): {skip_tanggal} | Skip (video lama): {skip_lama}")
             
         except Exception as e:
             logger.error(f"❌ Error scan: {e}")
