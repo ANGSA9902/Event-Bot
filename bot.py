@@ -75,7 +75,7 @@ async def scrape_tiktok_apify(hashtag):
         return videos
     
     try:
-        # PAKAI ACTOR RESMI clockworks (MORE STABLE)
+        # PAKAI ACTOR RESMI clockworks
         run_url = "https://api.apify.com/v2/acts/clockworks~tiktok-scraper/runs"
         params = {
             "token": APIFY_TOKEN
@@ -93,15 +93,20 @@ async def scrape_tiktok_apify(hashtag):
             requests.post, run_url, params=params, json=payload, timeout=30
         )
         
-        if response.status_code != 200:
-            logger.error(f"❌ Apify error: {response.status_code} - {response.text[:100]}")
+        # 201 = CREATED (berhasil)
+        if response.status_code not in [200, 201]:
+            logger.error(f"❌ Apify error: {response.status_code}")
             return videos
         
         run_data = response.json()
-        run_id = run_data.get("data", {}).get("id")
         
-        if not run_id:
-            logger.error("❌ Gagal dapat run_id")
+        # Cek response structure
+        if "data" in run_data and "id" in run_data["data"]:
+            run_id = run_data["data"]["id"]
+        elif "id" in run_data:
+            run_id = run_data["id"]
+        else:
+            logger.error(f"❌ Gagal dapat run_id: {run_data}")
             return videos
         
         logger.info(f"🔄 Apify running... (ID: {run_id})")
@@ -118,7 +123,10 @@ async def scrape_tiktok_apify(hashtag):
             status_data = status_response.json()
             status = status_data.get("data", {}).get("status")
             
+            logger.info(f"⏳ Status: {status}")
+            
             if status == "SUCCEEDED":
+                # Ambil hasil
                 dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items"
                 dataset_response = await asyncio.to_thread(
                     requests.get, dataset_url, params={"token": APIFY_TOKEN, "limit": 10}, timeout=10
@@ -147,6 +155,9 @@ async def scrape_tiktok_apify(hashtag):
             
             await asyncio.sleep(3)
             waited += 3
+        
+        if waited >= max_wait:
+            logger.warning(f"⏰ Timeout #{hashtag}")
         
     except Exception as e:
         logger.error(f"❌ Error Apify: {e}")
