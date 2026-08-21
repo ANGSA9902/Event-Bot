@@ -6,7 +6,6 @@ import os
 import logging
 from datetime import datetime
 import pytz
-from playwright.async_api import async_playwright
 
 # ============================================================
 # LOGGING
@@ -61,57 +60,50 @@ def save_sent(sent):
 sent_videos = load_sent()
 
 # ============================================================
-# SCRAPE TIKTOK (PAKAI PLAYWRIGHT)
+# SCRAPE TIKTOK (PAKAI API)
 # ============================================================
 
 async def scrape_tiktok(hashtag):
-    """Ambil video dari TikTok hashtag pake Playwright."""
+    """Ambil video dari TikTok hashtag pakai API."""
     videos = []
     
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
-            page = await context.new_page()
+        url = "https://www.tiktok.com/api/challenge/item_list/"
+        params = {
+            "aid": "1988",
+            "challengeName": hashtag,
+            "count": 5,
+            "cursor": "0",
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://www.tiktok.com/",
+            "Accept": "application/json",
+        }
+        
+        response = await asyncio.to_thread(
+            requests.get, url, params=params, headers=headers, timeout=15
+        )
+        
+        data = response.json()
+        items = data.get("itemList", [])
+        
+        for item in items:
+            caption = item.get("desc", "")
+            author = item.get("author", {}).get("uniqueId", "unknown")
+            video_id = item.get("id", "")
+            video_url = f"https://www.tiktok.com/@{author}/video/{video_id}"
             
-            url = f"https://www.tiktok.com/tag/{hashtag}"
-            logger.info(f"Membuka {url}")
-            await page.goto(url, timeout=30000)
-            await page.wait_for_timeout(3000)
-            
-            for _ in range(3):
-                await page.mouse.wheel(0, 1000)
-                await page.wait_for_timeout(1000)
-            
-            video_elements = await page.query_selector_all('div[data-e2e="user-post-item"]')
-            
-            for element in video_elements[:5]:
-                try:
-                    caption_elem = await element.query_selector('div[data-e2e="video-desc"]')
-                    caption = await caption_elem.text_content() if caption_elem else ""
-                    
-                    link_elem = await element.query_selector('a[href*="/video/"]')
-                    if link_elem:
-                        video_url = await link_elem.get_attribute('href')
-                        video_url = f"https://www.tiktok.com{video_url}"
-                    else:
-                        continue
-                    
-                    if caption:
-                        videos.append({
-                            "caption": caption.strip(),
-                            "author": hashtag,
-                            "hashtag": hashtag,
-                            "url": video_url,
-                        })
-                except Exception as e:
-                    logger.warning(f"Error parsing video: {e}")
-            
-            await browser.close()
-            logger.info(f"✅ #{hashtag}: {len(videos)} video")
-            
+            if caption:
+                videos.append({
+                    "caption": caption,
+                    "author": author,
+                    "hashtag": hashtag,
+                    "url": video_url,
+                })
+                
+        logger.info(f"✅ #{hashtag}: {len(videos)} video")
+        
     except Exception as e:
         logger.error(f"❌ Error #{hashtag}: {e}")
     
