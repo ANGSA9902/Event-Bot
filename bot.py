@@ -3,8 +3,20 @@ import asyncio
 import requests
 import json
 import os
+import logging
 from datetime import datetime
 import pytz
+from playwright.async_api import async_playwright
+
+# ============================================================
+# LOGGING
+# ============================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # KONFIGURASI
@@ -50,52 +62,62 @@ def save_sent(sent):
 sent_videos = load_sent()
 
 # ============================================================
-# SCRAPE TIKTOK
+# SCRAPE TIKTOK (DENGAN PLAYWRIGHT)
 # ============================================================
 
 async def scrape_tiktok(hashtag):
-    """Ambil video dari TikTok hashtag."""
+    """Ambil video dari TikTok hashtag menggunakan Playwright."""
     videos = []
     
     try:
-        url = "https://www.tiktok.com/api/challenge/item_list/"
-        params = {
-            "aid": "1988",
-            "challengeName": hashtag,
-            "count": 5,
-            "cursor": "0",
-        }
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://www.tiktok.com/",
-            "Accept": "application/json",
-        }
-        
-        response = await asyncio.to_thread(
-            requests.get, url, params=params, headers=headers, timeout=15
-        )
-        
-        data = response.json()
-        items = data.get("itemList", [])
-        
-        for item in items:
-            caption = item.get("desc", "")
-            author = item.get("author", {}).get("uniqueId", "unknown")
-            video_id = item.get("id", "")
-            video_url = f"https://www.tiktok.com/@{author}/video/{video_id}"
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
             
-            if caption:
-                videos.append({
-                    "caption": caption,
-                    "author": author,
-                    "hashtag": hashtag,
-                    "url": video_url,
-                })
-                
-        print(f"✅ #{hashtag}: {len(videos)} video")
-        
+            # Buka halaman hashtag TikTok
+            url = f"https://www.tiktok.com/tag/{hashtag}"
+            logger.info(f"Membuka {url}")
+            await page.goto(url, timeout=30000)
+            await page.wait_for_timeout(3000)
+            
+            # Scroll untuk load lebih banyak video
+            for _ in range(3):
+                await page.mouse.wheel(0, 1000)
+                await page.wait_for_timeout(1000)
+            
+            # Ambil data video
+            video_elements = await page.query_selector_all('div[data-e2e="user-post-item"]')
+            
+            for element in video_elements[:5]:  # Ambil 5 video pertama
+                try:
+                    caption_elem = await element.query_selector('div[data-e2e="video-desc"]')
+                    caption = await caption_elem.text_content() if caption_elem else ""
+                    
+                    link_elem = await element.query_selector('a[href*="/video/"]')
+                    if link_elem:
+                        video_url = await link_elem.get_attribute('href')
+                        video_url = f"https://www.tiktok.com{video_url}"
+                    else:
+                        continue
+                    
+                    if caption:
+                        videos.append({
+                            "caption": caption.strip(),
+                            "author": hashtag,
+                            "hashtag": hashtag,
+                            "url": video_url,
+                        })
+                except Exception as e:
+                    logger.warning(f"Error parsing video: {e}")
+            
+            await browser.close()
+            logger.info(f"✅ #{hashtag}: {len(videos)} video")
+            
     except Exception as e:
-        print(f"❌ Error #{hashtag}: {e}")
+        logger.error(f"❌ Error #{hashtag}: {e}")
     
     return videos
 
@@ -126,7 +148,7 @@ class TikTokBot(discord.Client):
         self.is_scanning = False
 
     async def on_ready(self):
-        print(f"✅ Bot {self.user} login!")
+        logger.info(f"✅ Bot {self.user} login!")
         
         channel = self.get_channel(self.channel_id)
         if channel:
@@ -154,18 +176,18 @@ class TikTokBot(discord.Client):
             return
         
         self.is_scanning = True
-        print(f"\n🔍 [{datetime.now(WIB).strftime('%H:%M WIB')}] Scan TikTok...")
+        logger.info(f"\n🔍 [{datetime.now(WIB).strftime('%H:%M WIB')}] Scan TikTok...")
         
         try:
             all_videos = []
             
             for hashtag in HASHTAGS:
-                print(f"📱 Scraping #{hashtag}...")
+                logger.info(f"📱 Scraping #{hashtag}...")
                 videos = await scrape_tiktok(hashtag)
                 all_videos.extend(videos)
                 await asyncio.sleep(2)
             
-            print(f"📊 Total video: {len(all_videos)}")
+            logger.info(f"📊 Total video: {len(all_videos)}")
             
             kirim_count = 0
             
@@ -187,17 +209,17 @@ class TikTokBot(discord.Client):
                     kirim_count += 1
                     await asyncio.sleep(1)
             
-            print(f"✅ Total dikirim: {kirim_count}")
+            logger.info(f"✅ Total dikirim: {kirim_count}")
             
         except Exception as e:
-            print(f"❌ Error: {e}")
+            logger.error(f"❌ Error scan: {e}")
         finally:
             self.is_scanning = False
 
     async def send_to_discord(self, video, keywords):
         channel = self.get_channel(self.channel_id)
         if not channel:
-            print("❌ Channel tidak ditemukan!")
+            logger.error("❌ Channel tidak ditemukan!")
             return
         
         embed = discord.Embed(
@@ -217,9 +239,9 @@ class TikTokBot(discord.Client):
         
         try:
             await channel.send(embed=embed)
-            print(f"📤 Terkirim: {video['caption'][:50]}")
+            logger.info(f"📤 Terkirim: {video['caption'][:50]}")
         except Exception as e:
-            print(f"❌ Gagal kirim: {e}")
+            logger.error(f"❌ Gagal kirim: {e}")
 
 
 # ============================================================
