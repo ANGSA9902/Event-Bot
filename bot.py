@@ -56,91 +56,86 @@ def save_sent(sent):
 sent_videos = load_sent()
 
 # ============================================================
-# CEK TANGGAL VIDEO (DARI UPLOAD TIME)
+# DETEKSI SEMUA TANGGAL DI CAPTION
 # ============================================================
 
-def is_recent_video(create_time):
-    """Cek apakah video diupload hari ini atau besok."""
-    if not create_time:
-        return False
-    
-    try:
-        # Coba parse timestamp (bisa berupa integer atau string)
-        if isinstance(create_time, (int, float)):
-            video_date = datetime.fromtimestamp(create_time, tz=WIB)
-        elif isinstance(create_time, str):
-            # Coba format ISO
-            if create_time.isdigit():
-                video_date = datetime.fromtimestamp(int(create_time), tz=WIB)
-            else:
-                # Coba parse string date
-                video_date = datetime.fromisoformat(create_time.replace('Z', '+00:00'))
-                video_date = video_date.astimezone(WIB)
-        else:
-            return False
-        
-        now = datetime.now(WIB)
-        
-        # Cek apakah video dari hari ini atau besok
-        if video_date.date() == now.date():
-            return True
-        if video_date.date() == (now + timedelta(days=1)).date():
-            return True
-        
-        logger.info(f"📅 Skip video dari {video_date.strftime('%d/%m/%Y')}")
-        return False
-        
-    except Exception as e:
-        logger.warning(f"⚠️ Gagal parse tanggal: {e}")
-        return False
-
-
-def is_today_or_tomorrow_caption(caption):
-    """Cek apakah caption mention tanggal hari ini atau besok (fallback)."""
+def extract_all_dates(caption):
+    """Ambil semua tanggal yang disebutkan di caption."""
     now = datetime.now(WIB)
-    today_str = now.strftime("%d/%m/%Y")
-    tomorrow_str = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+    today = now.date()
+    tomorrow = (now + timedelta(days=1)).date()
     
-    date_patterns = [
-        r'(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})',
-        r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|Mei|Jun|Jul|Agu|Sep|Okt|Nov|Des)\s+(\d{4})',
+    dates_found = []
+    
+    patterns = [
         r'(\d{1,2})\s+(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})',
-        r'tanggal\s+(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})',
+        r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|Mei|Jun|Jul|Agu|Sep|Okt|Nov|Des)\s+(\d{4})',
+        r'(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})',
         r'(\d{1,2})[/\-](\d{1,2})[/\-](\d{2})',
     ]
     
-    caption_lower = caption.lower()
+    bulan_map = {
+        'januari': 1, 'februari': 2, 'maret': 3, 'april': 4, 'mei': 5, 'juni': 6,
+        'juli': 7, 'agustus': 8, 'september': 9, 'oktober': 10, 'november': 11, 'desember': 12,
+        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'mei': 5, 'jun': 6,
+        'jul': 7, 'agu': 8, 'sep': 9, 'okt': 10, 'nov': 11, 'des': 12
+    }
     
-    for pattern in date_patterns:
-        matches = re.findall(pattern, caption)
+    for pattern in patterns:
+        matches = re.findall(pattern, caption, re.IGNORECASE)
         for match in matches:
             try:
                 if len(match) == 3:
-                    if len(match[2]) == 2:
-                        year = 2000 + int(match[2])
-                    else:
-                        year = int(match[2])
-                    
-                    day = int(match[0])
-                    month = int(match[1])
-                    
-                    try:
-                        date_obj = datetime(year, month, day, tzinfo=WIB)
-                        date_str = date_obj.strftime("%d/%m/%Y")
+                    if match[0].isdigit() and match[2].isdigit():
+                        day = int(match[0])
                         
-                        if date_str == today_str or date_str == tomorrow_str:
-                            return True
-                    except:
-                        pass
+                        if match[1].lower() in bulan_map:
+                            month = bulan_map[match[1].lower()]
+                        elif match[1].isdigit():
+                            month = int(match[1])
+                        else:
+                            continue
+                        
+                        year = int(match[2])
+                        if year < 100:
+                            year = 2000 + year
+                        
+                        try:
+                            date_obj = datetime(year, month, day, tzinfo=WIB)
+                            dates_found.append(date_obj.date())
+                        except:
+                            pass
             except:
                 pass
     
-    if "hari ini" in caption_lower or "today" in caption_lower:
-        return True
-    if "besok" in caption_lower or "tomorrow" in caption_lower:
-        return True
+    dates_found = list(set(dates_found))
     
-    return False
+    caption_lower = caption.lower()
+    if "hari ini" in caption_lower or "today" in caption_lower:
+        dates_found.append(today)
+    if "besok" in caption_lower or "tomorrow" in caption_lower:
+        dates_found.append(tomorrow)
+    
+    return dates_found
+
+
+def get_upcoming_dates(caption):
+    """
+    Ambil tanggal event yang HARI INI atau LEBIH (masih akan datang).
+    Skip tanggal yang sudah lewat (kemarin atau lebih).
+    Return: (list tanggal akan datang, list semua tanggal)
+    """
+    all_dates = extract_all_dates(caption)
+    
+    now = datetime.now(WIB)
+    today = now.date()
+    
+    upcoming_dates = []
+    for date in all_dates:
+        if date >= today:  # Hari ini atau lebih
+            upcoming_dates.append(date)
+    
+    return upcoming_dates, all_dates
 
 # ============================================================
 # SCRAPE TIKTOK PAKAI APIFY
@@ -259,7 +254,8 @@ class TikTokBot(discord.Client):
                 title="🟢 TikTok Monitor ONLINE! (Apify)",
                 description=f"📱 Hashtags:\n"
                            f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}\n\n"
-                           f"📅 Filter: Hanya video HARI INI & BESOK (dari upload time)",
+                           f"📅 Filter: Event HARI INI atau MENDATANG\n"
+                           f"⏰ Skip event yang sudah LEWAT",
                 color=discord.Color.green(),
             )
             await channel.send(embed=embed)
@@ -289,8 +285,7 @@ class TikTokBot(discord.Client):
             logger.info(f"📊 Total video: {len(all_videos)}")
             
             kirim_count = 0
-            skip_tanggal = 0
-            skip_lama = 0
+            skip_count = 0
             
             for video in all_videos:
                 video_url = video.get("url", "")
@@ -298,35 +293,29 @@ class TikTokBot(discord.Client):
                 if video_url in sent_videos:
                     continue
                 
-                # FILTER UTAMA: Cek tanggal upload video
-                create_time = video.get("create_time", "")
+                caption = video.get("caption", "")
                 
-                if not is_recent_video(create_time):
-                    # Fallback: cek caption
-                    caption = video.get("caption", "")
-                    if not is_today_or_tomorrow_caption(caption):
-                        skip_tanggal += 1
-                        continue
-                    else:
-                        # Caption bilang hari ini, tapi upload time tidak mendukung
-                        skip_lama += 1
-                        continue
+                # Cek apakah ada event hari ini atau mendatang
+                upcoming_dates, all_dates = get_upcoming_dates(caption)
                 
-                # KIRIM VIDEO
-                await self.send_to_discord(video)
-                sent_videos.add(video_url)
-                save_sent(sent_videos)
-                kirim_count += 1
-                await asyncio.sleep(1)
+                if upcoming_dates:
+                    # Kirim dengan tanggal yang akan datang
+                    await self.send_to_discord(video, upcoming_dates, all_dates)
+                    sent_videos.add(video_url)
+                    save_sent(sent_videos)
+                    kirim_count += 1
+                    await asyncio.sleep(1)
+                else:
+                    skip_count += 1
             
-            logger.info(f"✅ Total dikirim: {kirim_count} | Skip (bukan hari ini/besok): {skip_tanggal} | Skip (video lama): {skip_lama}")
+            logger.info(f"✅ Total dikirim: {kirim_count} | Skip (event sudah lewat): {skip_count}")
             
         except Exception as e:
             logger.error(f"❌ Error scan: {e}")
         finally:
             self.is_scanning = False
 
-    async def send_to_discord(self, video):
+    async def send_to_discord(self, video, upcoming_dates, all_dates):
         channel = self.get_channel(self.channel_id)
         if not channel:
             logger.error("❌ Channel tidak ditemukan!")
@@ -334,26 +323,54 @@ class TikTokBot(discord.Client):
         
         caption = video.get("caption", "")
         
-        # Tandai kalau event hari ini
+        # Tampilkan semua tanggal yang ditemukan
         now = datetime.now(WIB)
-        today_str = now.strftime("%d/%m/%Y")
-        tomorrow_str = (now + timedelta(days=1)).strftime("%d/%m/%Y")
+        today = now.date()
+        tomorrow = (now + timedelta(days=1)).date()
+        lusa = (now + timedelta(days=2)).date()
         
-        if today_str in caption or "hari ini" in caption.lower() or "today" in caption.lower():
-            tag = "🔴 HARI INI!"
-        elif tomorrow_str in caption or "besok" in caption.lower() or "tomorrow" in caption.lower():
-            tag = "🟡 BESOK!"
-        else:
-            tag = "📅 CEK TANGGAL"
+        date_lines = []
+        
+        # Tampilkan semua tanggal yang ditemukan
+        for date in sorted(all_dates):
+            if date == today:
+                date_lines.append(f"🔴 {date.strftime('%d %B %Y')} - HARI INI!")
+            elif date == tomorrow:
+                date_lines.append(f"🟡 {date.strftime('%d %B %Y')} - BESOK!")
+            elif date == lusa:
+                date_lines.append(f"🟢 {date.strftime('%d %B %Y')} - LUSA!")
+            elif date > today:
+                date_lines.append(f"📅 {date.strftime('%d %B %Y')} - AKAN DATANG")
+            else:
+                date_lines.append(f"⏰ {date.strftime('%d %B %Y')} - SUDAH LEWAT")
+        
+        # Status event yang akan datang
+        event_status = []
+        for date in upcoming_dates:
+            if date == today:
+                event_status.append("🔴 BERLANGSUNG HARI INI!")
+            elif date == tomorrow:
+                event_status.append("🟡 BESOK!")
+            elif date == lusa:
+                event_status.append("🟢 LUSA!")
+            else:
+                selisih = (date - today).days
+                event_status.append(f"📅 {selisih} HARI LAGI!")
+        
+        status_str = "\n".join(event_status) if event_status else "Event akan datang"
+        
+        dates_str = "\n".join(date_lines) if date_lines else "Tidak ada tanggal terdeteksi"
         
         embed = discord.Embed(
-            title=f"📱 {tag}",
-            description=f"**Caption:**\n{caption[:500]}",
+            title="📱 EVENT TERDETEKSI!",
+            description=f"**Caption:**\n{caption[:800]}",
             color=discord.Color.blue(),
         )
         
         embed.add_field(name="👤 Author", value=f"@{video['author']}", inline=True)
         embed.add_field(name="🏷️ Hashtag", value=f"#{video['hashtag']}", inline=True)
+        embed.add_field(name="📅 Tanggal Event", value=dates_str, inline=False)
+        embed.add_field(name="📌 Status", value=status_str, inline=False)
         
         if video.get("url"):
             embed.add_field(name="🔗 Link TikTok", value=f"[Klik di sini]({video['url']})", inline=False)
