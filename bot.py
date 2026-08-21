@@ -31,6 +31,8 @@ HASHTAGS = [
     "RobloxIndonesia",
     "RobloxAnomali",
     "FashionShowRoblox",
+    "Kalcer",
+    "RobloxEvent",
 ]
 
 WIB = pytz.timezone("Asia/Jakarta")
