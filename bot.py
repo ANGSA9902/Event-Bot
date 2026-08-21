@@ -33,7 +33,7 @@ HASHTAGS = [
     "FashionShowRoblox",
 ]
 
-# KEYWORD YANG DICARI (show, event, fashion DIHAPUS)
+# KEYWORD YANG DICARI
 KEYWORDS = [
     "anomali",
     "roblox",
@@ -75,15 +75,18 @@ async def scrape_tiktok_apify(hashtag):
         return videos
     
     try:
-        # PAKAI ACTOR GRATIS
-        run_url = "https://api.apify.com/v2/acts/jupri~tiktok-scraper-api-free/runs"
+        # PAKAI ACTOR RESMI clockworks (MORE STABLE)
+        run_url = "https://api.apify.com/v2/acts/clockworks~tiktok-scraper/runs"
         params = {
             "token": APIFY_TOKEN
         }
         payload = {
-            "hashtags": [hashtag],
+            "searchQueries": [hashtag],
+            "maxResults": 5,
             "resultsPerPage": 5,
-            "maxResults": 3,
+            "shouldDownloadVideos": False,
+            "shouldDownloadSubtitles": False,
+            "shouldDownloadComments": False
         }
         
         response = await asyncio.to_thread(
@@ -91,7 +94,7 @@ async def scrape_tiktok_apify(hashtag):
         )
         
         if response.status_code != 200:
-            logger.error(f"❌ Apify error: {response.status_code}")
+            logger.error(f"❌ Apify error: {response.status_code} - {response.text[:100]}")
             return videos
         
         run_data = response.json()
@@ -105,7 +108,7 @@ async def scrape_tiktok_apify(hashtag):
         
         # Tunggu hasil
         status_url = f"https://api.apify.com/v2/actor-runs/{run_id}"
-        max_wait = 40
+        max_wait = 45
         waited = 0
         
         while waited < max_wait:
@@ -118,7 +121,7 @@ async def scrape_tiktok_apify(hashtag):
             if status == "SUCCEEDED":
                 dataset_url = f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items"
                 dataset_response = await asyncio.to_thread(
-                    requests.get, dataset_url, params={"token": APIFY_TOKEN, "limit": 5}, timeout=10
+                    requests.get, dataset_url, params={"token": APIFY_TOKEN, "limit": 10}, timeout=10
                 )
                 items = dataset_response.json()
                 
