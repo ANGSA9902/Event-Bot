@@ -219,18 +219,9 @@ class EventView(View):
             url=video_url,
             style=discord.ButtonStyle.link
         ))
-        self.add_item(Button(
-            label="📢 Share Event",
-            style=discord.ButtonStyle.primary,
-            custom_id="share"
-        ))
-
-    @discord.ui.button(label="📢 Share Event", style=discord.ButtonStyle.primary)
-    async def share_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("✅ Event sudah di-share!", ephemeral=True)
 
 # ============================================================
-# BUILD UI KEREN
+# BUILD UI
 # ============================================================
 
 def build_embed(video, keyword=None):
@@ -239,7 +230,6 @@ def build_embed(video, keyword=None):
     hashtag = video.get("hashtag", "")
     video_url = video.get("url", "")
     
-    # ── DETEKSI STATUS ──
     dates = extract_all_dates(caption)
     now = datetime.now(WIB)
     today = now.date()
@@ -261,7 +251,6 @@ def build_embed(video, keyword=None):
         status = "📅 MENDATANG"
         icon = "🔵"
     
-    # ── BUILD ──
     embed = discord.Embed(
         title=f"✦ {icon} {status}",
         description=f"```\n{caption[:500].strip()}\n```",
@@ -280,7 +269,6 @@ def build_embed(video, keyword=None):
         inline=False
     )
     
-    # ── TANGGAL ──
     if dates:
         date_lines = []
         for date in sorted(dates):
@@ -350,11 +338,12 @@ def extract_event_keyword(message):
     return content
 
 # ============================================================
-# COMMAND: PURGE
+# BOT UTAMA
 # ============================================================
 
-bot = discord.Client(intents=discord.Intents.default())
-bot.intents.message_content = True
+intents = discord.Intents.default()
+intents.message_content = True
+bot = discord.Client(intents=intents)
 
 @bot.event
 async def on_ready():
@@ -370,10 +359,10 @@ async def on_ready():
                 f"`@{bot.user.name} event anomali`\n"
                 "`/event fashion`\n"
                 "`!event kalcer`\n\n"
-                "─── Command ───\n"
-                "`!purge 50` → hapus 50 pesan\n"
-                "`!purgeuser @user 20` → hapus pesan user\n"
-                "`!purgebot 30` → hapus pesan bot\n\n"
+                "─── Command Hapus ───\n"
+                "`!purge 10` → hapus 10 pesan\n"
+                "`!purgebot 10` → hapus pesan bot\n"
+                "`!purgeuser @user 10` → hapus pesan user\n\n"
                 "─── Keyword ───\n"
                 "`anomali` • `roblox` • `fashion` • `kalcer`"
             ),
@@ -387,10 +376,10 @@ async def on_message(message):
     if message.author == bot.user:
         return
     
-    # ── COMMAND PURGE ──
+    # ── !PURGE ──
     if message.content.startswith('!purge'):
         if not message.author.guild_permissions.manage_messages:
-            await message.reply("❌ Kamu tidak punya izin!")
+            await message.reply("❌ Kamu tidak punya izin `Manage Messages`!")
             return
         
         try:
@@ -401,14 +390,41 @@ async def on_message(message):
                 return
             
             deleted = await message.channel.purge(limit=amount + 1)
-            await message.channel.send(f"✅ {len(deleted)-1} pesan dihapus!", delete_after=5)
-        except:
-            await message.reply("❌ Gagal hapus pesan!")
+            msg = await message.channel.send(f"✅ {len(deleted)-1} pesan dihapus!")
+            await asyncio.sleep(3)
+            await msg.delete()
+        except Exception as e:
+            await message.reply(f"❌ Error: {e}")
+        return
     
-    # ── COMMAND PURGEUSER ──
-    elif message.content.startswith('!purgeuser'):
+    # ── !PURGEBOT ──
+    if message.content.startswith('!purgebot'):
         if not message.author.guild_permissions.manage_messages:
-            await message.reply("❌ Kamu tidak punya izin!")
+            await message.reply("❌ Kamu tidak punya izin `Manage Messages`!")
+            return
+        
+        try:
+            parts = message.content.split()
+            amount = int(parts[1]) if len(parts) > 1 else 10
+            if amount < 1 or amount > 100:
+                await message.reply("❌ Jumlah harus 1-100!")
+                return
+            
+            def check(msg):
+                return msg.author.bot
+            
+            deleted = await message.channel.purge(limit=amount + 1, check=check)
+            msg = await message.channel.send(f"✅ {len(deleted)-1} pesan bot dihapus!")
+            await asyncio.sleep(3)
+            await msg.delete()
+        except Exception as e:
+            await message.reply(f"❌ Error: {e}")
+        return
+    
+    # ── !PURGEUSER ──
+    if message.content.startswith('!purgeuser'):
+        if not message.author.guild_permissions.manage_messages:
+            await message.reply("❌ Kamu tidak punya izin `Manage Messages`!")
             return
         
         try:
@@ -417,60 +433,47 @@ async def on_message(message):
                 await message.reply("❌ Format: !purgeuser @user 10")
                 return
             
-            user_id = int(parts[1].replace('<@', '').replace('>', '').replace('!', ''))
+            # Extract user ID from mention
+            mention = parts[1]
+            user_id = int(re.sub(r'[<@!>]', '', mention))
             user = await bot.fetch_user(user_id)
             amount = int(parts[2]) if len(parts) > 2 else 10
+            
+            if amount < 1 or amount > 100:
+                await message.reply("❌ Jumlah harus 1-100!")
+                return
             
             def check(msg):
                 return msg.author == user
             
             deleted = await message.channel.purge(limit=amount + 1, check=check)
-            await message.channel.send(f"✅ {len(deleted)-1} pesan dari {user.mention} dihapus!", delete_after=5)
-        except:
-            await message.reply("❌ Gagal hapus pesan!")
-    
-    # ── COMMAND PURGEBOT ──
-    elif message.content.startswith('!purgebot'):
-        if not message.author.guild_permissions.manage_messages:
-            await message.reply("❌ Kamu tidak punya izin!")
-            return
-        
-        try:
-            parts = message.content.split()
-            amount = int(parts[1]) if len(parts) > 1 else 10
-            
-            def check(msg):
-                return msg.author.bot
-            
-            deleted = await message.channel.purge(limit=amount + 1, check=check)
-            await message.channel.send(f"✅ {len(deleted)-1} pesan bot dihapus!", delete_after=5)
-        except:
-            await message.reply("❌ Gagal hapus pesan!")
+            msg = await message.channel.send(f"✅ {len(deleted)-1} pesan dari {user.mention} dihapus!")
+            await asyncio.sleep(3)
+            await msg.delete()
+        except Exception as e:
+            await message.reply(f"❌ Error: {e}")
+        return
     
     # ── EVENT COMMAND ──
-    elif is_command(message):
+    if is_command(message):
         await handle_event_command(message)
 
 async def handle_event_command(message):
     keyword = extract_event_keyword(message)
     
-    # ── LOADING ──
     loading_embed = discord.Embed(
         title="✦ 🔍 Mencari...",
         description=f"Event **{keyword}** di TikTok",
         color=0x6BCBFF
     )
-    loading_embed.set_footer(text="Mohon tunggu sebentar...")
     loading_msg = await message.reply(embed=loading_embed)
     
-    # ── SCRAPE ──
     all_videos = []
     for hashtag in HASHTAGS:
         videos = await scrape_tiktok_apify(hashtag)
         all_videos.extend(videos)
         await asyncio.sleep(1)
     
-    # ── FILTER ──
     keyword_lower = keyword.lower()
     filtered_videos = []
     
@@ -483,7 +486,6 @@ async def handle_event_command(message):
     
     await loading_msg.delete()
     
-    # ── TIDAK ADA ──
     if not filtered_videos:
         embed = discord.Embed(
             title="✦ ❌ Tidak Ditemukan",
@@ -497,11 +499,9 @@ async def handle_event_command(message):
             ),
             color=0xFF6B6B
         )
-        embed.set_footer(text="✦ Coba lagi dengan keyword yang berbeda")
         await message.reply(embed=embed)
         return
     
-    # ── HASIL ──
     result_embed = discord.Embed(
         title=f"✦ ✅ {len(filtered_videos)} Event Ditemukan",
         description=f"Keyword: **{keyword}**",
@@ -509,7 +509,6 @@ async def handle_event_command(message):
     )
     await message.reply(embed=result_embed)
     
-    # ── KIRIM EVENT CARDS ──
     for video in filtered_videos[:5]:
         embed, view = build_embed(video, keyword)
         await message.channel.send(embed=embed, view=view)
