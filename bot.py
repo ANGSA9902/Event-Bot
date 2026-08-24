@@ -56,7 +56,7 @@ def save_sent(sent):
 sent_videos = load_sent()
 
 # ============================================================
-# DETEKSI TANGGAL
+# DETEKSI TANGGAL (tetap dipakai untuk display)
 # ============================================================
 
 def extract_all_dates(caption):
@@ -433,7 +433,6 @@ async def on_message(message):
                 await message.reply("❌ Format: !purgeuser @user 10")
                 return
             
-            # Extract user ID from mention
             mention = parts[1]
             user_id = int(re.sub(r'[<@!>]', '', mention))
             user = await bot.fetch_user(user_id)
@@ -468,48 +467,37 @@ async def handle_event_command(message):
     )
     loading_msg = await message.reply(embed=loading_embed)
     
+    # ── SCRAPE SEMUA HASHTAG ──
     all_videos = []
     for hashtag in HASHTAGS:
         videos = await scrape_tiktok_apify(hashtag)
         all_videos.extend(videos)
         await asyncio.sleep(1)
     
-    keyword_lower = keyword.lower()
-    filtered_videos = []
-    
-    for video in all_videos:
-        caption = video.get("caption", "").lower()
-        if keyword_lower in caption or keyword_lower in video.get("hashtag", "").lower():
-            dates = extract_all_dates(video.get("caption", ""))
-            if dates:
-                filtered_videos.append(video)
-    
     await loading_msg.delete()
     
-    if not filtered_videos:
+    # ── TANPA FILTER, KIRIM SEMUA VIDEO ──
+    if not all_videos:
         embed = discord.Embed(
-            title="✦ ❌ Tidak Ditemukan",
-            description=(
-                f"Keyword **{keyword}** tidak ditemukan.\n\n"
-                "─── Tips ───\n"
-                "• Coba keyword lain\n"
-                "• Cek langsung di TikTok\n\n"
-                "─── Hashtag ───\n"
-                f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}"
-            ),
+            title="✦ ❌ Tidak Ada Video",
+            description="Tidak ada video dari TikTok.\n\n"
+                       "─── Hashtag ───\n"
+                       f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}",
             color=0xFF6B6B
         )
         await message.reply(embed=embed)
         return
     
+    # ── KIRIM SEMUA VIDEO ──
     result_embed = discord.Embed(
-        title=f"✦ ✅ {len(filtered_videos)} Event Ditemukan",
+        title=f"✦ ✅ {len(all_videos)} Video Ditemukan",
         description=f"Keyword: **{keyword}**",
         color=0x6BCBFF
     )
     await message.reply(embed=result_embed)
     
-    for video in filtered_videos[:5]:
+    # ── KIRIM 5 VIDEO PERTAMA ──
+    for video in all_videos[:5]:
         embed, view = build_embed(video, keyword)
         await message.channel.send(embed=embed, view=view)
         await asyncio.sleep(0.5)
