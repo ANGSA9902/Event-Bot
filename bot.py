@@ -117,33 +117,58 @@ def extract_all_dates(caption):
     return dates_found
 
 # ============================================================
-# CEK APAKAH CAPTION EVENT
+# CEK HADIAH (ROBUX, UANG, GIVEAWAY)
 # ============================================================
 
-def is_event_caption(caption):
-    """Cek apakah caption benar-benar membahas event."""
+def has_prize(caption):
+    """Cek apakah caption mengandung hadiah."""
     caption_lower = caption.lower()
     
-    event_keywords = [
-        "event", "giveaway", "hadiah", "robux", "competition",
-        "lomba", "fashion show", "fashionshow", "anomali",
-        "pendaftaran", "daftar", "join", "ikuti", "battle",
-        "competition", "challenge", "hadiah", "prize", "winner"
+    prize_keywords = [
+        "robux", "hadiah", "giveaway", "prize", "uang", 
+        "diamond", "gift", "reward", "free", "gratis",
+        "menang", "winner", "chance", "kesempatan"
     ]
     
-    found = 0
-    for kw in event_keywords:
+    for kw in prize_keywords:
         if kw in caption_lower:
-            found += 1
-    
-    has_date = len(extract_all_dates(caption)) > 0
-    
-    if found >= 2:
-        return True
-    if has_date and found >= 1:
-        return True
+            return True
     
     return False
+
+# ============================================================
+# CEK APAKAH CAPTION EVENT + HADIAH
+# ============================================================
+
+def is_event_with_prize(caption, keyword):
+    """Cek apakah caption event dan ada hadiah, serta sesuai keyword."""
+    caption_lower = caption.lower()
+    keyword_lower = keyword.lower()
+    
+    # 1. Cek keyword
+    if keyword_lower not in caption_lower:
+        return False
+    
+    # 2. Cek event
+    event_keywords = [
+        "event", "giveaway", "lomba", "competition", 
+        "fashion show", "battle", "challenge", "anomali"
+    ]
+    
+    is_event = False
+    for ek in event_keywords:
+        if ek in caption_lower:
+            is_event = True
+            break
+    
+    if not is_event:
+        return False
+    
+    # 3. Cek hadiah
+    if not has_prize(caption):
+        return False
+    
+    return True
 
 # ============================================================
 # SCRAPE TIKTOK PAKAI APIFY (DENGAN GAMBAR)
@@ -212,7 +237,7 @@ async def scrape_tiktok_apify(hashtag):
                     video_url = item.get("webVideoUrl", "") or item.get("url", "")
                     create_time = item.get("createTime", "") or item.get("createdAt", "") or item.get("timestamp", "")
                     
-                    # ── AMBIL GAMBAR COVER / THUMBNAIL ──
+                    # ── AMBIL GAMBAR ──
                     image_url = (
                         item.get("videoCoverUrl", "") or 
                         item.get("cover", "") or 
@@ -220,7 +245,6 @@ async def scrape_tiktok_apify(hashtag):
                         item.get("thumbnailUrl", "")
                     )
                     
-                    # ── AMBIL AVATAR AUTHOR ──
                     if isinstance(item.get("author"), dict):
                         avatar_url = item.get("author", {}).get("avatar", "")
                     else:
@@ -305,7 +329,6 @@ def build_embed(video, keyword=None):
         timestamp=datetime.now(WIB)
     )
     
-    # ── AUTHOR DENGAN AVATAR ──
     embed.set_author(
         name=f"@{author}",
         icon_url=avatar_url or "https://cdn.discordapp.com/emojis/1298439013180113058.png"
@@ -317,7 +340,14 @@ def build_embed(video, keyword=None):
         inline=False
     )
     
-    # ── TANGGAL ──
+    # ── TAMBAH STATUS HADIAH ──
+    if has_prize(caption):
+        embed.add_field(
+            name="🎁 Hadiah",
+            value="✅ Ada hadiah! (Robux/Uang/Giveaway)",
+            inline=False
+        )
+    
     if dates:
         date_lines = []
         for date in sorted(dates):
@@ -335,11 +365,10 @@ def build_embed(video, keyword=None):
             inline=False
         )
     
-    # ── TAMPILKAN GAMBAR COVER VIDEO ──
+    # ── TAMPILKAN GAMBAR COVER ──
     if image_url:
         embed.set_image(url=image_url)
     
-    # ── THUMBNAIL (ikon kecil) ──
     embed.set_thumbnail(
         url="https://cdn.discordapp.com/emojis/1298439013180113058.png"
     )
@@ -363,7 +392,7 @@ def is_command(message):
     bot_mention_alt = f"<@!{bot.user.id}>"
     
     if bot_mention in message.content or bot_mention_alt in message.content:
-        keywords = ["event", "ada event", "cari event", "event apa"]
+        keywords = ["event", "ada event", "cari event", "event apa", "anomali"]
         for kw in keywords:
             if kw in message.content.lower():
                 return True
@@ -381,13 +410,13 @@ def extract_event_keyword(message):
     content = content.replace(bot_mention, "").replace(bot_mention_alt, "")
     content = content.replace("/event", "").replace("!event", "")
     
-    for word in ["event", "ada", "cari", "apa"]:
+    for word in ["event", "ada", "cari", "apa", "hari", "ini", "besok", "yang", "dengan", "hadiah"]:
         content = content.replace(word, "")
     
     content = content.strip()
     
     if not content:
-        return "event"
+        return "anomali"
     
     return content
 
@@ -406,23 +435,23 @@ async def on_ready():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         embed = discord.Embed(
-            title="✦ TikTok Event Finder",
+            title="✦ TikTok Event Finder (GACOR!)",
             description=(
-                "🔍 Cari event Roblox dari TikTok\n\n"
+                "🔍 Cari event Roblox **anomali** dengan **HADIAH**!\n\n"
                 "─── Cara Pakai ───\n"
-                f"`@{bot.user.name} event anomali`\n"
-                "`/event fashion`\n"
-                "`!event kalcer`\n\n"
+                f"`@{bot.user.name} anomali`\n"
+                "`@bot cari event anomali`\n"
+                "`/event anomali`\n\n"
                 "─── Command ───\n"
                 "`!purge 10` → hapus 10 pesan\n"
                 "`!purgebot 10` → hapus pesan bot\n"
                 "`!purgeuser @user 10` → hapus pesan user\n\n"
                 "─── Keyword ───\n"
-                "`anomali` • `roblox` • `fashion` • `kalcer`"
+                "`anomali` → khusus cari event anomali + hadiah"
             ),
             color=0x6BCBFF
         )
-        embed.set_footer(text="✦ Made with ❤️ • Event Finder v3")
+        embed.set_footer(text="✦ Made with ❤️ • Event Finder v4")
         await channel.send(embed=embed)
 
 @bot.event
@@ -516,7 +545,7 @@ async def handle_event_command(message):
     
     loading_embed = discord.Embed(
         title="✦ 🔍 Mencari...",
-        description=f"Event **{keyword}** di TikTok",
+        description=f"Event **{keyword}** dengan hadiah di TikTok",
         color=0x6BCBFF
     )
     loading_msg = await message.reply(embed=loading_embed)
@@ -539,23 +568,22 @@ async def handle_event_command(message):
         await message.reply(embed=embed)
         return
     
-    # ── FILTER EVENT ──
+    # ── FILTER EVENT + HADIAH ──
     keyword_lower = keyword.lower()
     event_videos = []
     
     for video in all_videos:
         caption = video.get("caption", "")
-        caption_lower = caption.lower()
         
-        if keyword_lower in caption_lower or keyword_lower in video.get("hashtag", "").lower():
-            if is_event_caption(caption):
-                event_videos.append(video)
+        # Filter: event + hadiah + keyword
+        if is_event_with_prize(caption, keyword_lower):
+            event_videos.append(video)
     
     if not event_videos:
         embed = discord.Embed(
-            title="✦ ❌ Tidak Ada Event Ditemukan",
+            title="✦ ❌ Tidak Ada Event dengan Hadiah",
             description=(
-                f"Tidak ada event **{keyword}** yang ditemukan.\n\n"
+                f"Tidak ada event **{keyword}** yang ada **HADIAH**.\n\n"
                 "─── Tips ───\n"
                 "• Coba keyword lain\n"
                 "• Cek langsung di TikTok\n\n"
@@ -568,7 +596,7 @@ async def handle_event_command(message):
         return
     
     result_embed = discord.Embed(
-        title=f"✦ ✅ {len(event_videos)} Event Ditemukan",
+        title=f"✦ ✅ {len(event_videos)} Event dengan Hadiah Ditemukan",
         description=f"Keyword: **{keyword}**",
         color=0x6BCBFF
     )
