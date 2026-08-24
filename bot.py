@@ -56,7 +56,7 @@ def save_sent(sent):
 sent_videos = load_sent()
 
 # ============================================================
-# DETEKSI TANGGAL (tetap dipakai untuk display)
+# DETEKSI TANGGAL
 # ============================================================
 
 def extract_all_dates(caption):
@@ -117,7 +117,36 @@ def extract_all_dates(caption):
     return dates_found
 
 # ============================================================
-# SCRAPE TIKTOK PAKAI APIFY
+# CEK APAKAH CAPTION EVENT
+# ============================================================
+
+def is_event_caption(caption):
+    """Cek apakah caption benar-benar membahas event."""
+    caption_lower = caption.lower()
+    
+    event_keywords = [
+        "event", "giveaway", "hadiah", "robux", "competition",
+        "lomba", "fashion show", "fashionshow", "anomali",
+        "pendaftaran", "daftar", "join", "ikuti", "battle",
+        "competition", "challenge", "hadiah", "prize", "winner"
+    ]
+    
+    found = 0
+    for kw in event_keywords:
+        if kw in caption_lower:
+            found += 1
+    
+    has_date = len(extract_all_dates(caption)) > 0
+    
+    if found >= 2:
+        return True
+    if has_date and found >= 1:
+        return True
+    
+    return False
+
+# ============================================================
+# SCRAPE TIKTOK PAKAI APIFY (DENGAN GAMBAR)
 # ============================================================
 
 async def scrape_tiktok_apify(hashtag):
@@ -183,6 +212,20 @@ async def scrape_tiktok_apify(hashtag):
                     video_url = item.get("webVideoUrl", "") or item.get("url", "")
                     create_time = item.get("createTime", "") or item.get("createdAt", "") or item.get("timestamp", "")
                     
+                    # ── AMBIL GAMBAR COVER / THUMBNAIL ──
+                    image_url = (
+                        item.get("videoCoverUrl", "") or 
+                        item.get("cover", "") or 
+                        item.get("thumbnail", "") or 
+                        item.get("thumbnailUrl", "")
+                    )
+                    
+                    # ── AMBIL AVATAR AUTHOR ──
+                    if isinstance(item.get("author"), dict):
+                        avatar_url = item.get("author", {}).get("avatar", "")
+                    else:
+                        avatar_url = ""
+                    
                     if caption:
                         videos.append({
                             "caption": caption,
@@ -190,6 +233,8 @@ async def scrape_tiktok_apify(hashtag):
                             "hashtag": hashtag,
                             "url": video_url,
                             "create_time": create_time,
+                            "image_url": image_url,
+                            "avatar_url": avatar_url,
                         })
                 
                 logger.info(f"✅ #{hashtag}: {len(videos)} video dari Apify")
@@ -221,7 +266,7 @@ class EventView(View):
         ))
 
 # ============================================================
-# BUILD UI
+# BUILD UI DENGAN GAMBAR
 # ============================================================
 
 def build_embed(video, keyword=None):
@@ -229,6 +274,8 @@ def build_embed(video, keyword=None):
     author = video.get("author", "unknown")
     hashtag = video.get("hashtag", "")
     video_url = video.get("url", "")
+    image_url = video.get("image_url", "")
+    avatar_url = video.get("avatar_url", "")
     
     dates = extract_all_dates(caption)
     now = datetime.now(WIB)
@@ -258,9 +305,10 @@ def build_embed(video, keyword=None):
         timestamp=datetime.now(WIB)
     )
     
+    # ── AUTHOR DENGAN AVATAR ──
     embed.set_author(
         name=f"@{author}",
-        icon_url="https://cdn.discordapp.com/emojis/1298439013180113058.png"
+        icon_url=avatar_url or "https://cdn.discordapp.com/emojis/1298439013180113058.png"
     )
     
     embed.add_field(
@@ -269,6 +317,7 @@ def build_embed(video, keyword=None):
         inline=False
     )
     
+    # ── TANGGAL ──
     if dates:
         date_lines = []
         for date in sorted(dates):
@@ -286,13 +335,18 @@ def build_embed(video, keyword=None):
             inline=False
         )
     
+    # ── TAMPILKAN GAMBAR COVER VIDEO ──
+    if image_url:
+        embed.set_image(url=image_url)
+    
+    # ── THUMBNAIL (ikon kecil) ──
+    embed.set_thumbnail(
+        url="https://cdn.discordapp.com/emojis/1298439013180113058.png"
+    )
+    
     embed.set_footer(
         text=f"• {datetime.now(WIB).strftime('%d %b %Y %H:%M')} WIB",
         icon_url="https://cdn.discordapp.com/emojis/1298439013180113058.png"
-    )
-    
-    embed.set_thumbnail(
-        url="https://cdn.discordapp.com/emojis/1298439013180113058.png"
     )
     
     return embed, EventView(video_url)
@@ -333,7 +387,7 @@ def extract_event_keyword(message):
     content = content.strip()
     
     if not content:
-        return "roblox"
+        return "event"
     
     return content
 
@@ -359,7 +413,7 @@ async def on_ready():
                 f"`@{bot.user.name} event anomali`\n"
                 "`/event fashion`\n"
                 "`!event kalcer`\n\n"
-                "─── Command Hapus ───\n"
+                "─── Command ───\n"
                 "`!purge 10` → hapus 10 pesan\n"
                 "`!purgebot 10` → hapus pesan bot\n"
                 "`!purgeuser @user 10` → hapus pesan user\n\n"
@@ -467,7 +521,7 @@ async def handle_event_command(message):
     )
     loading_msg = await message.reply(embed=loading_embed)
     
-    # ── SCRAPE SEMUA HASHTAG ──
+    # ── SCRAPE ──
     all_videos = []
     for hashtag in HASHTAGS:
         videos = await scrape_tiktok_apify(hashtag)
@@ -476,28 +530,51 @@ async def handle_event_command(message):
     
     await loading_msg.delete()
     
-    # ── TANPA FILTER, KIRIM SEMUA VIDEO ──
     if not all_videos:
         embed = discord.Embed(
             title="✦ ❌ Tidak Ada Video",
-            description="Tidak ada video dari TikTok.\n\n"
-                       "─── Hashtag ───\n"
-                       f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}",
+            description="Tidak ada video dari TikTok.",
             color=0xFF6B6B
         )
         await message.reply(embed=embed)
         return
     
-    # ── KIRIM SEMUA VIDEO ──
+    # ── FILTER EVENT ──
+    keyword_lower = keyword.lower()
+    event_videos = []
+    
+    for video in all_videos:
+        caption = video.get("caption", "")
+        caption_lower = caption.lower()
+        
+        if keyword_lower in caption_lower or keyword_lower in video.get("hashtag", "").lower():
+            if is_event_caption(caption):
+                event_videos.append(video)
+    
+    if not event_videos:
+        embed = discord.Embed(
+            title="✦ ❌ Tidak Ada Event Ditemukan",
+            description=(
+                f"Tidak ada event **{keyword}** yang ditemukan.\n\n"
+                "─── Tips ───\n"
+                "• Coba keyword lain\n"
+                "• Cek langsung di TikTok\n\n"
+                "─── Hashtag ───\n"
+                f"{chr(10).join(f'• #{tag}' for tag in HASHTAGS)}"
+            ),
+            color=0xFF6B6B
+        )
+        await message.reply(embed=embed)
+        return
+    
     result_embed = discord.Embed(
-        title=f"✦ ✅ {len(all_videos)} Video Ditemukan",
+        title=f"✦ ✅ {len(event_videos)} Event Ditemukan",
         description=f"Keyword: **{keyword}**",
         color=0x6BCBFF
     )
     await message.reply(embed=result_embed)
     
-    # ── KIRIM 5 VIDEO PERTAMA ──
-    for video in all_videos[:5]:
+    for video in event_videos[:5]:
         embed, view = build_embed(video, keyword)
         await message.channel.send(embed=embed, view=view)
         await asyncio.sleep(0.5)
